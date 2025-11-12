@@ -1,0 +1,667 @@
+---
+title: "Analiza danych telekomunikacyjnych"
+author: "Ksawery Józefowski, 277513"
+date: "`r Sys.Date()`"
+output:
+  pdf_document:
+    toc: true
+    fig_caption: true
+    fig_width: 5
+    fig_height: 4
+    number_sections: true
+  html_document:
+    toc: true
+    df_print: paged
+header-includes:
+- \usepackage[OT4]{polski}
+- \usepackage[utf8]{inputenc}
+- \usepackage{graphicx}
+- \usepackage{float}
+subtitle: "Eksploracja danych - Lista nr 1"
+fontsize: 12pt
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+knitr::opts_chunk$set(warning = FALSE, message = FALSE) 
+knitr::opts_chunk$set(fig.pos = "H", out.extra = "", fig.align = "center")
+```
+\newpage
+# Wprowadzenie
+Naszym celem jest zastosowanie metod analizy opisowej (wykresy i wskaźniki sumaryczne) do analizy danych telekomunikacyjnych dotyczących migracji klientów. Dane pochodzą ze zbioru `WA_Fn-UseC_–Telco-Customer-Churn.csv`, który zawiera informacje o klientach firmy telekomunikacyjnej. Analiza ma na celu zrozumienie, jakie czynniki wpływają na decyzję klientów o rezygnacji z usług.
+
+# Opis danych
+Zbiór danych zawiera informacje o klientach firmy telekomunikacyjnej, w tym cechy demograficzne, informacje o usługach, z których korzystają, oraz informacje o tym, czy klient zrezygnował z usług.
+
+# ETAP 1: Przygotowanie danych
+## a) Wczytanie danych
+```{r, results='hide', echo=FALSE}
+# Biblioteki
+library(dplyr)
+library(tidyr)
+library(knitr)
+library(purrr)
+library(kableExtra)
+```
+
+```{r, results='hide'}
+# Wczytanie danych
+dane <- read.csv("WA_Fn-UseC_-Telco-Customer-Churn.csv", 
+                 stringsAsFactors = TRUE)
+
+# Sprawdzenie typów zmiennych
+str(dane)
+```
+Po wywołaniu polecenia okazuje się, że kolumny `SeniorCitizen` i `tenure` są typu *integer*. 'tenure' zostanie zmienione na *numeric*, a `SeniorCitizen` na *factor*. Zostaną one poprawione za pomocą:
+
+```{r, results='hide'}
+# Zmiana SeniorCitizen z integer na numeric
+dane$SeniorCitizen <- as.factor(dane$SeniorCitizen)
+
+# Zmiana tenure z integer na numeric
+dane$tenure <- as.numeric(dane$tenure)
+```
+\newpage
+## b) Podstawowe informacje o danych
+### Rozmiar danych: 
+Zbiór zawiera `r nrow(dane)` przypadków i `r ncol(dane)` cech.
+
+### Typy zmiennych: 
+#### Zmienne jakościowe
+- `gender` – płeć klienta (`Male`, `Female`)
+- `SeniorCitizen` – czy klient jest seniorem (`0` = Nie, `1` = Tak)
+- `Partner` – czy klient ma partnera (`Yes`, `No`)
+- `Dependents` – czy klient ma osoby na utrzymaniu (`Yes`, `No`)
+- `PhoneService` – czy klient ma usługę telefoniczną (`Yes`, `No`)
+- `MultipleLines` – czy klient ma wiele linii (`No phone service`, `No`, `Yes`)
+- `InternetService` – rodzaj usługi internetowej (`DSL`, `Fiber optic`, `No`)
+- `OnlineSecurity` – czy klient ma ochronę online (`No internet service`, `No`, `Yes`)
+- `OnlineBackup` – czy klient ma kopie zapasowe online (`No internet service`, `No`, `Yes`)
+- `DeviceProtection` – czy klient ma ubezpieczenie urządzenia (`No internet service`, `No`, `Yes`)
+- `TechSupport` – czy klient ma wsparcie techniczne (`No internet service`, `No`, `Yes`)
+- `StreamingTV` – czy klient korzysta z telewizji internetowej (`No internet service`, `No`, `Yes`)
+- `StreamingMovies` – czy klient korzysta z usług streamingowych (`No internet service`, `No`, `Yes`)
+- `Contract` – rodzaj umowy (`Month-to-month`, `One year`, `Two year`)
+- `PaperlessBilling` – czy klient korzysta z e-faktury (`Yes`, `No`)
+- `PaymentMethod` – metoda płatności (`Electronic check`, `Mailed check`, `Bank transfer`, `Credit card`)
+- **Zmienna docelowa**: `Churn` – czy klient zrezygnował (`Yes`, `No`)
+
+#### Zmienne ilościowe dyskretne
+- `tenure` – liczba miesięcy korzystania z usług
+
+#### Zmienne ilościowe ciągłe
+- `MonthlyCharges` – miesięczna opłata (wartości zmiennoprzecinkowe)
+- `TotalCharges` – łączna kwota zapłacona przez klienta
+
+\newpage
+### Identyfikatory klientów: 
+Zmienna `customerID` pełni rolę identyfikatora i zostanie usunięta poleceniem:
+
+```{r, results='hide'}
+# Usunięcie kolumny customerID
+dane <- dane[, -which(names(dane) == "customerID")]
+```
+### Brakujące obserwacje: 
+Sprawdzamy czy istnieją brakujące obserwacje poleceniem:
+```{r, results='hide'}
+# Sprawdzenie brakujących wartości
+any(is.na(dane))
+```
+Polecenie zwraca `TRUE`, więc w danych znajdują się brakujące wartości. Szukając głębiej brakujące wartości znajdują się w kolumnie `totalcharges`.
+
+### Nietypowe wartości
+W danych nie znaleziono żadnych nietypowych wartości.
+
+\newpage
+# ETAP 2: Analiza opisowa — wskaźniki sumaryczne i wykresy
+## a) Wskaźniki sumaryczne
+### Zmienne ilościowe
+```{r, echo=FALSE}
+# Przekazanie przystkich zmiennych ilościowych do funkcji wyznaczającej wskaźniki sumaryczne
+sum_stats <- dane %>% summarise(across(where(is.numeric), list(
+  srednia = mean,
+  mediana = median,
+  min = min,
+  max = max,
+  sd = sd
+), na.rm = TRUE)) %>% 
+  pivot_longer(everything(), names_to = "Wskaźnik", values_to = "Wartość") # Zmiana nazw kolumn
+
+# Formatowanie tabeli
+kbl(sum_stats, caption = "Wskaźniki sumaryczne zmiennych ilościowych", digits = 2) %>% 
+          kable_styling(latex_options = "HOLD_position")
+```
+Tabela przedstawia podstawowe wskaźniki sumaryczne dla trzech zmiennych:
+
+- `tenure`: Średnia wynosi 32,37 miesięcy, a mediana 29 miesięcy, co sugeruje, że większość klientów pozostaje z firmą przez około 2-3 lata. Najkrótszy okres to 0 miesięcy (nowi klienci), a najdłuższy to 72 miesiące (ponad 6 lat). Duże odchylenie standardowe (24,56) wskazuje na duże zróżnicowanie w długości trwania umowy.
+
+- `MonthlyCharges`: Średnia miesięczna opłata to 64,76 USD, ale mediana (70,35 USD) jest wyższa, co może wskazywać na to, że wiele klientów płaci więcej niż średnia. Najniższa opłata to 18,25 USD, a najwyższa to 118,75 USD, co pokazuje dużą różnorodność w kwotach miesięcznych.
+
+- `TotalCharges`: Średnia całkowita kwota zapłacona przez klientów wynosi 2283,30 USD, ale mediana (1397,47 USD) jest znacznie niższa, co sugeruje, że wielu klientów zapłaciło mniejsze sumy. Z dużym odchyleniem standardowym (2266,77 USD) wskazuje to na znaczną różnorodność w całkowitych płatnościach.
+
+\newpage
+### Zmienne jakościowe
+```{r, echo=FALSE}
+# Wybór zmiennych jakościowych
+zmienne_jak <- dane %>%
+  select(where(~ is.factor(.) | is.character(.))) %>%
+  names()
+
+# Funkcja robiąca proporcje dla danych zmiennych
+jak_summa <- function(dane, var_name) {
+  summa_table <- dane %>%
+    count(!!sym(var_name)) %>%
+    mutate(Proportion = round(n / sum(n) * 100, 1)) %>%
+    rename(Category = !!sym(var_name)) %>%
+    mutate(Variable = var_name) %>%
+    select(Variable, everything())
+  
+  # Robienie przerwy między zmiennymi
+  summa_table$Variable[2:nrow(summa_table)] <- ""
+  return(summa_table)
+}
+
+# Tabelka końcowa
+full_summa <- bind_rows(
+  lapply(zmienne_jak, function(var) {
+    jak_summa(dane, var)
+  })
+)
+
+# Formatowanie tabelki
+kbl(full_summa, align = c("l", "l", "r", "r"), digits = 2, col.names = c("Zmienna", "Wartość", "Liczność", "%")) %>%
+  kable_styling(font_size = 11, latex_options = "HOLD_position")
+```
+
+\newpage
+## b) Wykresy rozkładu zmiennych
+### Zmienne ilościowe
+```{r, echo=FALSE}
+# Zmienne pomocnicze (z jakiegoś powodu nie działa bez nich)
+Tenure <- dane$tenure
+MonthlyCharges <- dane$MonthlyCharges
+TotalCharges <- dane$TotalCharges
+
+# Formatowanie marginesów
+par(mfrow=c(1,3), 
+    mar = c(5,2,4,1) + 0.1,
+    oma = c(0,0,0,0))
+
+# Histogramy
+hist(Tenure, breaks=30, xlim=c(0,80), yli=c(0, 1000), col=rgb(1,0,0,0.5), xlab="Staż w Miesiącach", ylab="Ilość Osób", main="Tenure" )
+hist(MonthlyCharges, breaks=30, xlim=c(0,120), yli=c(0, 800), col=rgb(0,1,0,0.5), xlab="Ilość w USD", ylab="Ilość osób", main="MonthlyCharges" )
+hist(TotalCharges, breaks=30, xlim=c(0,8000), yli=c(0, 2000), col=rgb(0,0,1,0.5), xlab="Ilość w USD", ylab="Ilość osób", main="TotalCharges" )
+
+# Boxplots
+boxplot(Tenure, main="Tenure", col=rgb(1,0,0,0.5))
+boxplot(MonthlyCharges, main="MonthlyCharges", col=rgb(0,1,0,0.5))
+boxplot(TotalCharges, main="TotalCharges", col=rgb(0,0,1,0.5)) 
+par(mfrow=c(1,1))
+```
+\newpage
+### Zmienne jakościowe
+```{r, echo=FALSE}
+par(mfrow = c(2,2), 
+    mar = c(0.5, 0, 2, 0),
+    oma = c(0,0,0,0))  
+
+# Funkcja ułatwiająca wypis wykresów kołowych
+plot_pie <- function(data, column, colors, title, cex_legend = 1, cex_labels = 0.7, x = "topleft") {
+  piepercent <- round(100 * table(data[[column]]) / sum(table(data[[column]])), 1) # Obliczanie procentów
+  # Funkcja R do piechart
+  pie(table(data[[column]]), 
+      labels = paste0(piepercent, "%"), # Procenty do etykiet
+      col = colors, 
+      cex = cex_labels,
+      main = title)
+  legend(x, 
+         legend = unique(data[[column]]), 
+         fill = colors, 
+         cex = cex_legend,
+         bty = "n")
+}
+
+# Wyświetlanie
+plot_pie(dane, "Partner", c("green", "red"), "Partner",x = "topright")
+plot_pie(dane, "Dependents", c("green", "red"), "Dependents", x = "topright")
+plot_pie(dane, "PhoneService", c("green", "red"), "PhoneService")
+plot_pie(dane, "MultipleLines", c("green", "red", "gray"), "MultipleLines", cex_legend = 0.8)
+plot_pie(dane, "InternetService", c("blue", "orange", "gray"), "InternetService", cex_legend = 0.8)
+plot_pie(dane, "OnlineSecurity", c("green", "red", "gray"), "OnlineSecurity", cex_legend = 0.75, x = "bottomleft")
+plot_pie(dane, "OnlineBackup", c("green", "red", "gray"), "OnlineBackup", cex_legend = 0.8, x = "bottomleft")
+plot_pie(dane, "DeviceProtection", c("green", "red", "gray"), "DeviceProtection", cex_legend = 0.8, x = "bottomleft")
+plot_pie(dane, "TechSupport", c("green", "red", "gray"), "TechSupport", cex_legend = 0.75, x = "bottomleft")
+plot_pie(dane, "StreamingTV", c("green", "red", "gray"), "StreamingTV", cex_legend = 0.8, x = "bottomleft")
+plot_pie(dane, "StreamingMovies", c("green", "red", "gray"), "StreamingMovies", cex_legend = 0.8, x = "bottomleft")
+plot_pie(dane, "Contract", c("orange", "blue", "purple"), "Contract", cex_legend = 0.65, cex_labels = 0.7)
+plot_pie(dane, "PaperlessBilling", c("green", "red"), "PaperlessBilling")
+plot_pie(dane, "SeniorCitizen", c("lightgreen", "lightblue"), "SeniorCitizen")
+plot_pie(dane, "gender", c("lightblue", "pink"), "Gender")
+plot_pie(dane, "Churn", c("lightgreen", "lightblue"), "Churn", x = "topright")
+
+# Osobno bo się nie mieści
+par(mfrow = c(1, 1), mar = c(5, 0, 4, 0) + 0.1)
+plot_pie(dane, "PaymentMethod", rainbow(4), "PaymentMethod", x = "bottomleft", cex_legend = 0.8)
+par(mfrow = c(1, 1), mar = c(5, 4, 4, 2) + 0.1)
+```
+\newpage
+## c) Analiza zależności między zmiennymi
+```{r, echo=FALSE}
+# Wybór zmiennych ilościowych
+zmienne_kor <- dane[, c("tenure", "MonthlyCharges", "TotalCharges")]
+
+# Macierz wykresów rozrzutu
+pairs(zmienne_kor, 
+      main = "Macierz wykresów rozrzutu dla zmiennych ilościowych",
+      pch = 19, 
+      col = rgb(0, 0, 1, 0.3),
+      cex.main = 0.9
+      )     # Wartości korelacji w dolnej części
+
+# Macierz korelacji
+macierz_korelacji <- cor(zmienne_kor, use = "complete.obs")
+macierz_korelacji %>%
+  kable(digits = 2, caption = "Macierz korelacji") %>%
+  kable_styling(latex_options = "HOLD_position")
+```
+
+```{r, echo=FALSE}
+# Wybór zmiennych ilościowych
+zmienne_kor <- dane[, c("tenure", "MonthlyCharges", "TotalCharges")]
+
+# Macierz wykresów rozrzutu z podziałem na Churn
+pairs(zmienne_kor, 
+      main = "Macierz wykresów rozrzutu dla zmiennych ilościowych wg Churn",
+      pch = 19, 
+      cex = 0.5,
+      col = as.numeric(dane$Churn) + 1,  # Kolory zależne od Churn
+      oma = c(5,5,5,5),
+      cex.main = 0.8)
+
+# Dodanie legendy dla Churn
+par(xpd = TRUE)
+legend("right", 
+       legend = levels(dane$Churn),
+       fill = unique(as.numeric(dane$Churn) + 1),
+       cex = 0.5)
+
+# Dla Churn = "No"
+korelacja_No <- dane %>%
+  filter(Churn == "No") %>%
+  select(tenure, MonthlyCharges, TotalCharges) %>%
+  cor(use = "complete.obs")
+
+# Dla Churn = "Yes"
+korelacja_Yes <- dane %>%
+  filter(Churn == "Yes") %>%
+  select(tenure, MonthlyCharges, TotalCharges) %>%
+  cor(use = "complete.obs")
+
+# Prezentacja wyników w osobnych tabelach
+kable(korelacja_No, digits = 2, caption = "Macierz korelacji (Churn = No)") %>% 
+  kable_styling(latex_options = "HOLD_position")
+
+kable(korelacja_Yes, digits = 2, caption = "Macierz korelacji (Churn = Yes)") %>% 
+  kable_styling(latex_options = "HOLD_position")
+```
+
+\newpage
+## d) Interpretacja wyników
+### Zakres wartości dla poszczególnych zmiennych
+
+#### Zmienne ilościowe:
+
+- **tenure**: 
+  - Zakres: 0-72 miesięcy 
+  - Rozpiętość: 72 miesiące
+- **MonthlyCharges**: 
+  - Zakres: 18.25-118.75 USD 
+  - Rozpiętość: 100.5 USD
+- **TotalCharges**: 
+  - Zakres: 18.80-8684.80 USD 
+  - Rozpiętość: 8666 USD
+
+#### Zmienne jakościowe: \newline
+
+Wszystkie zmienne jakościowe mają wartości kategoryczne np:
+
+- **gender**: Female/Male
+- **SeniorCitizen**: 0/1
+- **Contract**: Month-to-month/One year/Two year
+- **Churn**: No/Yes
+
+### Analiza zmiennych ilościowych
+
+#### Symetria rozkładów:
+
+- **tenure**: 
+  - Rozkład prawo skośny
+  - (średnia 32.37 vs mediana 29.00)
+- **MonthlyCharges**: 
+  - Rozkład lekko lewo skośny
+  - (średnia 64.76 vs mediana 70.35)
+- **TotalCharges**: 
+  - Rozkład silnie prawostronnie skośny 
+  - (średnia 2283.30 vs mediana 1397.47)
+
+#### Zmienność: \newline
+
+Największą zmienność (na podstawie odchylenia standardowego) wykazuje:
+
+1. TotalCharges (sd = 2266.77)
+2. MonthlyCharges (sd = 30.09)
+3. tenure (sd = 24.56)
+
+\newpage
+### Analiza zmiennych jakościowych
+
+#### Częstość kategorii:
+
+- **gender**: prawie równy podział (Female 49.5%, Male 50.5%)
+- **SeniorCitizen**: większość to młodsi klienci (83.8% vs 16.2%)
+- **Partner**: lekka przewaga osób bez partnera (51.7% vs 48.3%)
+- **Dependents**: większość bez osób na utrzymaniu (70% vs 30%)
+- **PhoneService**: zdecydowana większość ma usługę telefoniczną (90.3%)
+- **InternetService**: 
+  - Fiber optic (44%) 
+  - DSL (34.4%) 
+  - Brak (21.7%)
+- **Contract**: 
+  - Miesięczne (55%) 
+  - Roczne (20.9%) 
+  - Dwuletnie (24.1%)
+- **PaperlessBilling**: preferowane (59.2% vs 40.8%)
+- **PaymentMethod**: 
+  - Electronic check (33.6%) 
+  - Pozostałe metody (~22% każda)
+- **Churn**: większość nie rezygnuje (73.5% vs 26.5%)
+
+### Analiza zależności między zmiennymi
+
+Macierz korelacji pokazuje:
+
+- Silną dodatnią korelację między **tenure** a **TotalCharges** (0.83)  
+- Umiarkowaną korelację między **MonthlyCharges** a **TotalCharges** (0.65)
+- Słabą korelację między **tenure** a **MonthlyCharges** (0.25)
+
+## Wnioski ogólne
+
+1. Długość współpracy (tenure) silnie wpływa na wydatki klientów – im dłuższy okres współpracy, tym wyższe całkowite opłaty (TotalCharges), co wskazuje na lojalność klientów i kumulację kosztów.
+2. Wysoka zmienność wydatków klientów – największe różnice między klientami dotyczą TotalCharges (od 18.80 do 8684.80 USD), co może wynikać z różnic w długości współpracy i wybranych usługach.
+3. Rozkłady opłat są asymetryczne – TotalCharges i tenure są prawoskośne (więcej nowych klientów), a MonthlyCharges lewoskośny (częstsze wyższe miesięczne opłaty).
+4. Większość klientów nie rezygnuje z usług (Churn: 73.5%) – ale istotne są czynniki jak typ umowy (55% miesięczne) i usługi dodatkowe (np. 44% Fiber optic).
+5. Profil klienta: młody, bez osób na utrzymaniu – większość to osoby niebędące seniorami (83.8%), bez dependents (70%), często korzystające z paperless billing (59.2%) i usług internetowych (78.3%).
+
+# ETAP 3: Analiza opisowa z podziałem na grupy
+## a) Analiza z podziałem na grupy `Churn`
+```{r, echo=FALSE}
+# Podział na grupy, zmienne pomocnicze
+grupa_yes <- subset(dane, Churn == "Yes")
+grupa_no <- subset(dane, Churn == "No")
+```
+### Zmienne ilościowe
+```{r, echo=FALSE}
+# Funkcja do generowania wskaźników summarycznych dla zmiennych ilościowych wg Churn
+generate_group_stats <- function(data, group_name) {
+  data %>% 
+    summarise(across(where(is.numeric), list(
+      srednia = mean,
+      mediana = median,
+      min = min,
+      max = max,
+      sd = sd
+    ), na.rm = TRUE)) %>% 
+    pivot_longer(everything(), names_to = "Wskaźnik", values_to = "Wartość") %>% 
+    mutate(Grupa = group_name)
+}
+
+# Generowanie wskaźników dla obu grup
+stats_yes <- generate_group_stats(grupa_yes, "Churn = Yes")
+stats_no <- generate_group_stats(grupa_no, "Churn = No")
+
+# Łączenie i prezentacja wyników
+combined_stats <- bind_rows(stats_yes, stats_no) %>% 
+  pivot_wider(names_from = Grupa, values_from = Wartość)
+
+# Formatowanie
+kbl(combined_stats, caption = "Porównanie wskaźników sumarycznych między grupami", digits = 2) %>% 
+  kable_styling(latex_options = "HOLD_position")
+```
+
+```{r, echo=FALSE}
+# Ustawienia wykresów
+par(mfrow = c(2,3), mar = c(4, 4, 2, 0))
+
+# Wykresy dla tenure
+boxplot(tenure ~ Churn, data = dane, 
+        main = "Tenure",
+        col = c("lightblue", "pink"),
+        xlab = "Churn", ylab = "Miesiące")
+
+hist(grupa_no$tenure, breaks = 30, col = rgb(0,0,1,0.5), 
+     xlab = "Staż w miesiącach", ylab = "Częstość", 
+     main = "Tenure/ No", xlim = c(0, 80))
+hist(grupa_yes$tenure, breaks = 30, col = rgb(1,0,0,0.5), 
+     xlab = "Staż w miesiącach", ylab = "Częstość", 
+     main = "Tenure/ Yes", xlim = c(0, 80))
+
+# Wykresy dla MonthlyCharges
+boxplot(MonthlyCharges ~ Churn, data = dane, 
+        main = "MonthlyCharges",
+        col = c("lightblue", "pink"),
+        xlab = "Churn", ylab = "USD")
+
+hist(grupa_no$MonthlyCharges, breaks = 30, col = rgb(0,0,1,0.5), 
+     xlab = "Kwota w USD", ylab = "Częstość", 
+     main = "MonthlyCharges/ No", xlim = c(0, 120), cex.main = 0.95)
+hist(grupa_yes$MonthlyCharges, breaks = 30, col = rgb(1,0,0,0.5), 
+     xlab = "Kwota w USD", ylab = "Częstość", 
+     main = "MonthlyCharges/ Yes", xlim = c(0, 120), cex.main = 0.95)
+
+# Wykresy dla TotalCharges
+boxplot(TotalCharges ~ Churn, data = dane, 
+        main = "TotalCharges",
+        col = c("lightblue", "pink"),
+        xlab = "Churn", ylab = "USD")
+
+hist(grupa_no$TotalCharges, breaks = 30, col = rgb(0,0,1,0.5), 
+     xlab = "Kwota w USD", ylab = "Częstość", 
+     main = "TotalCharges/ No", xlim = c(0, 8000))
+hist(grupa_yes$TotalCharges, breaks = 30, col = rgb(1,0,0,0.5), 
+     xlab = "Kwota w USD", ylab = "Częstość", 
+     main = "TotalCharges/ Yes", xlim = c(0, 8000))
+
+par(mfrow = c(1, 1))
+```
+
+```{r, echo=FALSE}
+# Funkcja do rysowania wykresów słupkowych
+plot_grouped_bars <- function(var_name, colors = rainbow(4), cex_legend, x = "topright") {
+  prop_table <- prop.table(table(dane[[var_name]], dane$Churn), 1)
+  barplot(prop_table, beside = TRUE, 
+          col = colors,
+          main = paste(var_name, "wg Churn"),
+          xlab = "Churn", ylab = "Proporcja",
+          cex.main = 0.7
+          )
+  legend(x, 
+         legend = unique(dane[[var_name]]), 
+         fill = colors, 
+         cex = cex_legend,
+         bty = "n")
+}
+
+# Ustawienia wykresów
+par(mfrow = c(1, 2), mar = c(5, 4, 4, 0) + 0.1)
+
+# Wykresy dla wybranych zmiennych
+plot_grouped_bars("Contract", rainbow(3), cex_legend = 0.5)
+plot_grouped_bars("InternetService", rainbow(3), cex_legend = 0.7)
+plot_grouped_bars("PaymentMethod", rainbow(4), cex_legend = 0.35)
+plot_grouped_bars("PaperlessBilling", rainbow(2), cex_legend = 0.7)
+
+par(mfrow = c(1, 1))
+```
+## b) Analiza z podziałem na grupy
+Analizując wyniki, można zauważyć, że następujące zmienne wykazują największe zróżnicowanie między grupami klientów (Churn = Yes vs Churn = No):
+
+### Zmienne ilościowe:
+
+- **tenure**:
+  - Średni staż klientów, którzy odeszli: 17.98 miesięcy
+  - Średni staż lojalnych klientów: 37.57 miesięcy
+  - Różnica: 19.59 miesięcy (54.8% wyższa wartość dla lojalnych klientów)
+
+- **MonthlyCharges**:
+  - Średnia opłata miesięczna dla klientów, którzy odeszli: 74.44 USD
+  - Średnia opłata miesięczna dla lojalnych klientów: 61.27 USD
+  - Różnica: 13.17 USD (21.5% wyższa wartość dla klientów, którzy odeszli)
+
+- **TotalCharges**:
+  - Średnia opłata całkowita dla klientów, którzy odeszli: 1531.80 USD
+  - Średnia opłata całkowita dla lojalnych klientów: 2555.34 USD
+  - Różnica: 1023.54 USD (66.8% wyższa wartość dla lojalnych klientów)
+
+### Zmienne jakościowe:
+
+- **Contract**:
+  - Umowa miesięczna: 88.6% wśród klientów, którzy odeszli vs 49.3% wśród lojalnych
+  - Umowa roczna: 7.1% vs 24.9%
+  - Umowa dwuletnia: 4.3% vs 25.8%
+
+- **InternetService**:
+  - Fiber optic: 51.7% wśród klientów, którzy odeszli vs 41.4% wśród lojalnych
+  - DSL: 29.9% vs 35.8%
+  - Brak usługi: 18.4% vs 22.8%
+
+- **PaymentMethod**:
+  - Electronic check: 45.3% wśród klientów, którzy odeszli vs 29.8% wśród lojalnych
+  - Mailed check: 15.7% vs 18.6%
+  - Bank transfer: 19.9% vs 24.8%
+  - Credit card: 19.1% vs 26.8%
+
+- **PaperlessBilling**:
+  - Tak: 69.1% wśród klientów, którzy odeszli vs 55.7% wśród lojalnych
+
+\newpage
+## Wnioski dotyczące zróżnicowania:
+Największe różnice między grupami obserwujemy dla:
+
+- **Tenure**: klienci lojalni mają znacznie dłuższy staż
+
+- **Contract**: klienci z umowami miesięcznymi znacznie częściej odchodzą
+
+- **PaymentMethod**: klienci płacący elektronicznym czekiem częściej odchodzą
+
+- **MonthlyCharges**: klienci, którzy odchodzą, płacą wyższe miesięczne opłaty
+
+Zmienne, które najlepiej różnicują grupy to:
+
+- **Contract**: (szczególnie umowa miesięczna vs długoterminowe)
+
+- **Tenure**: (długość stażu)
+
+- **PaymentMethod**: (electronic check vs inne metody)
+
+- **MonthlyCharges**: (wysokość opłat miesięcznych)
+
+Interesujące jest, że choć klienci z usługą Fiber optic częściej odchodzą, różnice nie są tak znaczące jak w przypadku innych zmiennych.
+
+Te zmienne powinny być szczególnie brane pod uwagę przy budowaniu modeli predykcyjnych churnu.
+
+\newpage
+# ETAP 4: Podsumowanie — wnioski
+## a) Podsumowanie wyników z etapów 1-3
+### Przygotowanie danych (Etap 1):
+
+- Zbiór danych zawierał informacje o 7043 klientach i 20 zmiennych (ilościowych i jakościowych).
+
+- Wykryto brakujące wartości w kolumnie TotalCharges, które zostały pominięte w analizie.
+
+- Zmienne zostały odpowiednio przekonwertowane (np. SeniorCitizen na factor, tenure na numeric).
+
+### Analiza opisowa (Etap 2):
+
+- **Zmienne ilościowe**:
+  - Średni staż klientów (tenure) wynosił 32,4 miesiące, ale rozkład był prawoskośny (większość klientów miała krótszy staż).
+  - Średnia miesięczna opłata (MonthlyCharges) wynosiła 64,76 USD, przy czym klienci płacący więcej częściej rezygnowali.
+  - Łączne opłaty (TotalCharges) były silnie skorelowane z długością stażu (korelacja 0,83).
+
+- **Zmienne jakościowe**:
+  - Większość klientów korzystała z usług telefonicznych (90%) i internetowych (78%), głównie DSL (34%) i Fiber optic (44%).
+  - Najpopularniejszą umową była umowa miesięczna (55%), a najczęściej wybieraną metodą płatności – e-check (34%).
+  - 26,5% klientów zrezygnowało z usług (Churn = Yes).
+
+### Analiza z podziałem na grupy (Etap 3):
+
+- **Klienci, którzy odeszli**:
+  - Mieli krótszy staż (średnio 17,98 miesięcy vs. 37,57 miesięcy u lojalnych).
+  - Płacili wyższe opłaty miesięczne (średnio 74,44 USD vs. 61,27 USD).
+  - Częściej mieli umowy miesięczne (88,6% vs. 49,3%) i płacili e-checkiem (45,3% vs. 29,8%).
+
+- **Klienci lojalni**:
+  - Częściej mieli umowy długoterminowe (roczne/dwuletnie).
+  - Korzystali z DSL (35,8% vs. 29,9%), a mniej z Fiber optic (41,4% vs. 51,7%).
+
+\newpage
+## b) Charakterystyka klientów firmy
+### Profil demograficzny:
+
+- Prawie równy podział płci (50,5% mężczyzn, 49,5% kobiet).
+
+- Głównie młodsi klienci (tylko 16,2% to seniorzy).
+
+- 51,7% nie ma partnera, a 70% nie ma osób na utrzymaniu.
+
+### Korzystanie z usług:
+
+- 90% ma usługę telefoniczną, a 78% ma internet (głównie Fiber optic – 44%).
+
+### Najpopularniejsze dodatkowe usługi:
+
+- Streaming TV (38%) i Streaming Movies (39%).
+
+- Znacznie mniej klientów korzysta z ochrony online (29%) czy wsparcia technicznego (29%).
+
+- 59,2% korzysta z e-faktur.
+
+### Umowy i płatności:
+
+- 55% klientów ma umowy miesięczne, co może zwiększać ryzyko rezygnacji.
+
+- 33,6% płaci e-checkiem, co wiąże się z wyższym wskaźnikiem rezygnacji.
+
+## c) Przyczyny rezygnacji klientów i rekomendacje dla firmy
+### Główne przyczyny rezygnacji:
+
+- Wysokie miesięczne opłaty – Klienci, którzy odchodzą, płacą średnio 13,17 USD więcej niż lojalni.
+
+- Krótki staż i umowy miesięczne – Nowi klienci (średnio 18 miesięcy vs. 38 miesięcy) częściej rezygnują.
+
+- Metoda płatności (e-check) – 45,3% rezygnujących płaciło elektronicznym czekiem (vs. 29,8% lojalnych).
+
+- Usługa Fiber optic – Wiąże się z wyższymi opłatami i większą rezygnacją (51,7% vs. 41,4%).
+
+\newpage
+### Rekomendacje dla firmy:
+
+- Obniżenie cen dla nowych klientów – Wprowadzenie promocji dla klientów z krótkim stażem, aby zwiększyć ich lojalność.
+
+- Zachęta do umów długoterminowych – Np. zniżki za podpisanie umowy rocznej/dwuletniej.
+
+- Programy lojalnościowe – Nagradzanie klientów za długoletnią współpracę (np. dodatkowe GB internetu, darmowe usługi).
+
+- Poprawa jakości usługi Fiber optic – Jeśli klienci rezygnują z powodu wysokich cen, można wprowadzić tańsze pakiety.
+
+- Zachęta do innych metod płatności – Np. rabaty za automatyczne przelewy/karty kredytowe, aby zmniejszyć odsetek płatności e-checkiem.
+
+## Podsumowanie:
+Firma powinna skupić się na obniżeniu kosztów dla nowych klientów, promowaniu umów długoterminowych oraz zwiększeniu wartości usług, aby zmniejszyć wskaźnik rezygnacji. Analiza wskazuje, że kluczowe czynniki wpływające na odejścia to wysokie ceny, krótki staż i umowy miesięczne.
+
+# Spis literatury
+\begin{thebibliography}{}
+
+\bibitem{Kaggle}
+Kaggle, \emph{Telco Customer Churn}, \url{https://www.kaggle.com/datasets/blastchar/telco-customer-churn}.
+
+\end{thebibliography}

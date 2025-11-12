@@ -1,0 +1,565 @@
+---
+title: "Zaawansowane Metody Klasyfikacji i Analiza Skupień"
+author: "Ksawery Józefowski, 277513"
+date: "`r Sys.Date()`"
+output:
+  pdf_document:
+    keep_tex: true
+    toc: true
+    fig_caption: true
+    fig_width: 5
+    fig_height: 4
+    number_sections: true
+  html_document:
+    toc: true
+    df_print: paged
+header-includes:
+- \usepackage[OT4]{polski}
+- \usepackage[utf8]{inputenc}
+- \usepackage{graphicx}
+- \usepackage{float}
+subtitle: "Eksploracja danych - Lista nr 4"
+fontsize: 12pt
+---
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, fig.cap = "")
+knitr::opts_chunk$set(warning = FALSE, message = FALSE) 
+knitr::opts_chunk$set(fig.pos = "H", out.extra = "", fig.align = "center")
+```
+
+```{r, echo=FALSE, results='hide'}
+# Biblioteki
+library(dplyr)
+library(datasets)
+library(HDclassif)
+library(tidyverse)
+library(datasets)
+library(ggplot2)
+library(arules)
+library(titanic)
+library(kableExtra)
+library(gridExtra)
+library(knitr)
+library(ipred)
+library(cluster)
+library(mclust)
+library(clValid)
+library(MASS)
+library(factoextra)
+library(randomForest)
+library(class)
+library(rpart)
+library(e1071)
+library(ggdendro)
+library(dendextend)
+library(nnet)
+library(naivebayes)
+library(corrplot)
+library(e1071)
+library(mlbench)
+library(ggcorrplot)
+```
+
+\newpage
+# Zadanie nr 1
+## Wprowadzenie
+Celem analizy jest zastosowanie i ocena skuteczności zaawansowanych metod klasyfikacji `random forest` i `bagging`, jak i test algorytmu `SVM` do budowy klasyfikatorów bazujących na różnych jądrach.
+
+## Rodziny klasyfikatorów/uczenie zespołowe
+```{r, echo=FALSE}
+data(wine)
+wine$class <- as.factor(wine$class)
+set.seed(123)
+n <- nrow(wine)
+indeksy2 <- sample(1:n, size = round(2/3 * n))
+uczacy2 <- wine[indeksy2, ]
+testowy2 <- wine[-indeksy2, ]
+
+cols_to_scale <- setdiff(names(uczacy2), "class")
+
+means <- apply(uczacy2[, cols_to_scale], 2, mean)
+sds <- apply(uczacy2[, cols_to_scale], 2, sd)
+
+# Standaryzacja zbioru uczącego
+uczacy2_std <- as.data.frame(scale(uczacy2[, cols_to_scale], center = means, scale = sds))
+uczacy2_std$class <- uczacy2$class  # Dodanie kolumny z klasami
+
+# Standaryzacja zbioru testowego
+testowy2_std <- as.data.frame(scale(testowy2[, cols_to_scale], center = means, scale = sds))
+testowy2_std$class <- testowy2$class  # Dodanie kolumny z klasami
+
+```
+
+```{r, echo=FALSE, fig.cap="Wykres błędu Random Forest"}
+# Trenowanie modelu bagging
+bagging_model <- bagging(class ~ ., data = uczacy2_std, nbagg = 25)
+
+# Predykcje
+bagging_preds <- predict(bagging_model, newdata = testowy2_std, type = "class")
+
+# Macierz pomyłek
+conf_bagging <- table(Prawdziwe = testowy2_std$class, Prognozowane = bagging_preds)
+
+kbl(conf_bagging, format = 'latex', caption = "Macierz pomyłek Bagging", digits = 3) %>%
+  kable_styling(latex_options = "HOLD_position", bootstrap_options = c("striped", "hover", "condensed"))
+
+print(paste("Błąd klasyfikacji Bagging:", round(mean(bagging_preds != testowy2_std$class), 3)))
+
+####################
+
+# Trenowanie modelu RF
+rf_model <- randomForest(class ~ ., data = uczacy2_std, ntree = 100, importance = TRUE)
+
+# Predykcje
+rf_preds <- predict(rf_model, newdata = testowy2_std, type = "class")
+
+# Macierz pomyłek
+conf_rf <- table(Prawdziwe = testowy2_std$class, Prognozowane = rf_preds)
+
+kbl(conf_rf, format = 'latex', caption = "Macierz pomyłek Random Forest", digits = 3) %>%
+  kable_styling(latex_options = "HOLD_position", bootstrap_options = c("striped", "hover", "condensed"))
+
+print(paste("Błąd klasyfikacji Random Forest:", round(mean(rf_preds != testowy2_std$class), 3)))
+plot(rf_model, main = "")
+
+####################
+
+# Definicja funkcji predykcyjnej do drzewa
+mypredict.rpart <- function(object, newdata) {
+  predict(object, newdata = newdata, type = "class")
+}
+
+# Drzewo
+error.tree <- errorest(class ~ ., data = uczacy2_std, model = rpart,
+                       predict = mypredict.rpart,
+                       estimator = "632plus",
+                       est.para = control.errorest(nboot = 20))
+
+# Bagging
+error.bagging <- errorest(class ~ ., data = uczacy2_std, model = bagging,
+                          estimator = "632plus",
+                          est.para = control.errorest(nboot = 20))
+
+# Random Forest
+error.randomForest <- errorest(class ~ ., data = uczacy2_std, model = randomForest,
+                               estimator = "632plus",
+                               est.para = control.errorest(nboot = 20))
+
+# Redukcja błędu
+red_bagging <- (error.tree$error - error.bagging$error) / error.tree$error * 100
+red_rf <- (error.tree$error - error.randomForest$error) / error.tree$error * 100
+
+print(paste("Błąd drzewa:", round(error.tree$error, 3)))
+print(paste("Błąd baggingu:", round(error.bagging$error, 3)))
+print(paste("Błąd random forest:", round(error.randomForest$error, 3)))
+
+print(paste("Redukcja błędu (bagging):", round(red_bagging, 2), "%"))
+print(paste("Redukcja błędu (random forest):", round(red_rf, 2), "%"))
+```
+
+\newpage
+W przeprowadzonym porównaniu metod klasyfikacyjnych na zbiorze danych `wine` zastosowano trzy podejścia: pojedyncze drzewo decyzyjne jako klasyfikator bazowy, oraz dwie metody zespołowe, `bagging` oraz `random forest`. Wyniki klasyfikacji wskazują jednoznacznie, że metody zespołowe pozwalają na istotne zwiększenie dokładności predykcji. Dla pojedynczego drzewa decyzyjnego błąd klasyfikacji wyniósł około `12.1%`. Po zastosowaniu algorytmu `bagging` błąd ten spadł do około `6.5%`, co oznacza względną redukcję błędu klasyfikacji o ponad `46%`. Jeszcze większą poprawę zaobserwowano przy użyciu `random forest`, błąd klasyfikacji spadł do około `2%`, co odpowiada redukcji błędu o ponad `83%` w stosunku do klasyfikatora bazowego.
+
+Zarówno w oparciu o bezpośrednią ocenę klasyfikacji na zbiorze testowym (macierz pomyłek), jak i na podstawie bardziej zaawansowanej metody walidacyjnej `.632+`, metody zespołowe wykazały się wyraźnie lepszą skutecznością. `Random forest` przewyższył skutecznością `bagging`, co wynika z faktu, że dodatkowe losowanie zmiennych na etapie konstrukcji pojedynczych drzew wprowadza większą różnorodność modeli bazowych, a tym samym zwiększa ogólną zdolność klasyfikacyjną zespołu.
+
+Można więc jednoznacznie stwierdzić, że zastosowanie klasyfikatorów zespołowych prowadzi do *istotnej* redukcji błędu klasyfikacji w porównaniu do pojedynczego drzewa decyzyjnego. 
+
+\newpage
+## Metoda wektorów nośnych (SVM)
+Porównamy skuteczność modeli SVM z różnymi funkcjami jądrowymi:
+
+  - Jądro liniowe (kernel="linear")
+
+  - Jądro wielomianowe (kernel="polynomial")
+
+  - Jądro radialne (RBF) (kernel="radial")
+  
+### Jądro liniowe z różnymi wartościami `C`
+```{r, echo=FALSE}
+# Model SVM z jądrem liniowym (C=0.1)
+svm_linear_C01 <- svm(class ~ ., data = uczacy2_std, kernel = "linear", cost = 0.1)
+pred_linear_C01 <- predict(svm_linear_C01, testowy2_std)
+acc_linear_C01 <- mean(pred_linear_C01 == testowy2_std$class)
+
+# Model SVM z jądrem liniowym (C=1)
+svm_linear_C1 <- svm(class ~ ., data = uczacy2_std, kernel = "linear", cost = 1)
+pred_linear_C1 <- predict(svm_linear_C1, testowy2_std)
+acc_linear_C1 <- mean(pred_linear_C1 == testowy2_std$class)
+
+# Model SVM z jądrem liniowym (C=10)
+svm_linear_C10 <- svm(class ~ ., data = uczacy2_std, kernel = "linear", cost = 10)
+pred_linear_C10 <- predict(svm_linear_C10, testowy2_std)
+acc_linear_C10 <- mean(pred_linear_C10 == testowy2_std$class)
+
+conf_linear_C01 <- table(Prawdziwe = testowy2_std$class, Prognozowane = pred_linear_C01)
+conf_linear_C1 <- table(Prawdziwe = testowy2_std$class, Prognozowane = pred_linear_C1) 
+conf_linear_C10 <- table(Prawdziwe = testowy2_std$class, Prognozowane = pred_linear_C10)
+
+kbl(conf_linear_C01, format = 'latex', caption = "Macierz pomyłek SVM jądro liniowe (C=0.1)", digits = 0) %>%
+  kable_styling(latex_options = "HOLD_position", bootstrap_options = c("striped", "hover", "condensed"))
+print(paste("Dokładność (C=0.1):", acc_linear_C01))
+
+kbl(conf_linear_C1, format = 'latex', caption = "Macierz pomyłek SVM jądro liniowe (C=1)", digits = 0) %>%
+  kable_styling(latex_options = "HOLD_position", bootstrap_options = c("striped", "hover", "condensed"))
+print(paste("Dokładność (C=1):", acc_linear_C1))
+
+kbl(conf_linear_C10, format = 'latex', caption = "Macierz pomyłek SVM jądro liniowe (C=10)", digits = 0) %>%
+  kable_styling(latex_options = "HOLD_position", bootstrap_options = c("striped", "hover", "condensed"))
+print(paste("Dokładność (C=10):", acc_linear_C10))
+```
+Na podstawie uzyskanych wyników można zaobserwować wyraźny wpływ wyboru wartości parametru `C` na skuteczność klasyfikacji metodą `SVM.` W przypadku jądra liniowego widzimy, że zmiana parametru `C` ma istotne znaczenie dla dokładności modelu. Dla niskiej wartości `C=0.1` osiągnęliśmy perfekcyjną dokładność na poziomie `100%`, podczas gdy zwiększenie wartości `C` do 1 i 10 spowodowało nieznaczny spadek dokładności do około `98.3%`. Sugeruje to, że w tym konkretnym przypadku mniejsza wartość parametru `C`, odpowiadająca szerszemu marginesowi decyzyjnemu, lepiej radzi sobie z ogólnymi właściwościami danych.
+
+### Porównanie różnych jąder
+```{r, echo=FALSE}
+# Jądro wielomianowe
+svm_poly2 <- svm(class ~ ., data = uczacy2_std, kernel = "polynomial", degree = 2)
+pred_poly2 <- predict(svm_poly2, testowy2_std)
+acc_poly2 <- mean(pred_poly2 == testowy2_std$class)
+
+# Jądro radialne
+svm_radial <- svm(class ~ ., data = uczacy2_std, kernel = "radial")
+pred_radial <- predict(svm_radial, testowy2_std)
+acc_radial <- mean(pred_radial == testowy2_std$class)
+
+conf_poly2 <- table(Prawdziwe = testowy2_std$class, Prognozowane = pred_poly2)
+conf_radial <- table(Prawdziwe = testowy2_std$class, Prognozowane = pred_radial)
+
+kbl(conf_poly2, format = 'latex', caption = "Macierz pomyłek: SVM jądro wielomianowe (stopień 2)", digits = 0) %>%
+  kable_styling(latex_options = "HOLD_position", bootstrap_options = c("striped", "hover", "condensed"))
+print(paste("Dokładność (wielomian stopnia 2):", acc_poly2))
+
+kbl(conf_radial, format = 'latex', caption = "Macierz pomyłek: SVM jądro radialne (RBF)", digits = 0) %>%
+  kable_styling(latex_options = "HOLD_position", bootstrap_options = c("striped", "hover", "condensed"))
+print(paste("Dokładność (radialne RBF):", acc_radial))
+```
+Porównując różne funkcje jądrowe, wyraźnie widać różnice w osiąganej dokładności. Jądro liniowe i radialne dały najlepsze wyniki (`100%` dokładności), podczas gdy jądro wielomianowe stopnia drugiego osiągnęło nieco niższą dokładność na poziomie około `94.9%`. Ta różnica pokazuje, że wybór funkcji jądrowej ma kluczowe znaczenie dla skuteczności klasyfikacji. W tym przypadku zarówno proste jądro liniowe, jak i bardziej złożone jądro radialne doskonale poradziły sobie z separacją klas, podczas gdy jądro wielomianowe okazało się nieco mniej efektywne.
+
+Warto zauważyć, że doskonałe wyniki osiągnięte przez jądro liniowe mogą sugerować, że klasy w zbiorze danych `wine` są liniowo separowalne lub prawie liniowo separowalne w przestrzeni cech. Fakt, że jądro radialne również osiągnęło `100%` dokładność, potwierdza jego elastyczność i zdolność do dopasowania się do różnych struktur danych, chociaż w tym konkretnym przypadku nie było to konieczne, skoro prostsze jądro liniowe dało równie dobre wyniki.
+
+### Dostrojone jądro radialne
+```{r, echo=FALSE, fig.cap="Wydajność SVM"}
+# Zakresy dla C i gamma
+C_range <- 2^(-4:4)
+gamma_range <- 2^(-8:4)
+
+# Optymalizacja parametrów
+radial_tune <- tune(
+  svm,
+  train.x = uczacy2_std[, -which(names(uczacy2_std) == "class")],
+  train.y = uczacy2_std$class,
+  kernel = "radial",
+  ranges = list(cost = C_range, gamma = gamma_range)
+)
+
+plot(radial_tune, transform.x=log, transform.y=log, color.palette = topo.colors, main = "")
+
+# Model z optymalnymi parametrami
+svm_radial_tuned <- svm(
+  class ~ .,
+  data = uczacy2_std,
+  kernel = "radial",
+  cost = radial_tune$best.parameters$cost,
+  gamma = radial_tune$best.parameters$gamma
+)
+
+pred_radial_tuned <- predict(svm_radial_tuned, testowy2_std)
+acc_radial_tuned <- mean(pred_radial_tuned == testowy2_std$class)
+
+print(radial_tune$best.parameters)
+conf_radial_tuned <- table(Prawdziwe = testowy2_std$class, Prognozowane = pred_radial_tuned)
+kbl(conf_radial_tuned, format = 'latex', caption = "Macierz pomyłek: SVM jądro radialne (dostrojone)", digits = 0) %>%
+  kable_styling(latex_options = "HOLD_position", bootstrap_options = c("striped", "hover", "condensed"))
+print(paste("Dokładność (domyślne RBF):", acc_radial))
+print(paste("Dokładność (dostrojone RBF):", acc_radial_tuned))
+```
+Na podstawie przedstawionych wyników można stwierdzić, że zarówno model SVM z domyślnymi parametrami, jak i model z optymalnie dobranymi parametrami osiągnęły identyczną, perfekcyjną dokładność klasyfikacji na poziomie `100%`. Macierze pomyłek dla obu wersji modelu pokazują, że wszystkie próbki ze zbioru testowego zostały poprawnie zaklasyfikowane, bez żadnych błędów.
+
+Proces strojenia parametrów, mimo że zidentyfikował optymalne wartości parametrów 
+(`cost` = `r radial_tune$best.parameters$cost`, `gamma` = `r radial_tune$best.parameters$gamma`), nie przyniósł poprawy w skuteczności klasyfikacji w porównaniu z modelem wykorzystującym domyślne ustawienia. Wykres procesu strojenia sugeruje, że obszar optymalnych parametrów jest stosunkowo płaski, co oznacza, że podobną dokładność można osiągnąć przy różnych kombinacjach wartości `cost` i `gamma.`
+
+Wnioskując, w tym konkretnym przypadku optymalizacja parametrów nie poprawiła skuteczności klasyfikatora, ponieważ model z domyślnymi ustawieniami już osiągał maksymalną możliwą dokładność. Może to wynikać z faktu, że zbiór danych wine jest stosunkowo dobrze separowalny, a proste modele radzą sobie z nim doskonale nawet bez specjalnego dostrajania parametrów.
+
+## Wniosek
+Porównując skuteczność metod z punktu `a)` i `b)`, można stwierdzić, że zarówno metody zespołowe (`bagging` i `random forest`), jak i `SVM` osiągnęły bardzo wysoką dokładność klasyfikacji. `Random forest` bazując na metodzie walidacyjnej `.632+` uzyskał prawie perfekcyjny wynik. `SVM` z jądrem liniowym i radialnym sklasyfikował wszystkie próbki poprawnie. `Bagging` wypadł nieco gorzej, ale i tak znacznie lepiej niż pojedyncze drzewo decyzyjne.
+
+W przypadku `SVM` widoczny był wpływ wyboru jądra i parametru `C` na skuteczność, jądro liniowe i radialne okazały się lepsze niż wielomianowe, a niższe wartości `C` w niektórych przypadkach dawały lepsze wyniki. Strojenie parametrów dla jądra radialnego nie poprawiło wyników, ponieważ już domyślne ustawienia dawały perfekcyjną klasyfikację.
+
+Podsumowując, `SVM` z odpowiednim jądrem to najskuteczniejszae i najlepiej dopasowana metoda klasyfikacji dla tego zbioru danych.
+
+\newpage
+# Zadanie 2
+## Wprowadzenie
+Celem zadania jest zastosowanie algorytmów analizy skupień - PAM i AGNES oraz ocena i porównanie jakości grupowania.
+
+## Wybór i przygotowanie danych
+Do analizy wybieramy zbiór `wine`, który zawiera 178 rekordów. Jest to liczba mniejsza niż 200, więc nie będzie potrzeby tworzenia podzbioru. W zbiorze znajdują się zmienne z małymi i dużymi zakresami wartościowymi, więc zostanie zastosowana standaryzacja danych.
+```{r, echo=FALSE}
+kbl(head(wine), format = 'latex', caption = "Head zbioru wine", digits = 0) %>%
+  kable_styling(latex_options = "HOLD_position", bootstrap_options = c("striped", "hover", "condensed"))
+wine$class <- as.factor(wine$class)
+wine_class <- wine$Class
+wine_data <- wine[, -1]
+
+wine_scaled <- scale(wine_data)
+```
+
+## Macierz odmienności
+```{r, echo=FALSE, fig.cap="Macierze odmienności, odpowiednio order FALSE i order TRUE", fig.height=8, fig.width=6}
+wine_daisy <- daisy(wine_scaled, metric = "euclidean")
+wine_daisy_matrix <- as.matrix(wine_daisy)
+# wizualizacja macierzy odmienności
+# bez uporządkowania
+p1 <- fviz_dist(wine_daisy, order = FALSE, show_labels = FALSE)
+# po uporządkowaniu
+p2 <- fviz_dist(wine_daisy, order = TRUE, show_labels = FALSE)
+grid.arrange(p1, p2, ncol = 1)
+```
+
+## Metoda PAM
+```{r, echo=FALSE, fig.cap="Skupienia metodą PAM na przestrzeni MDS"}
+# Zastosowanie metody PAM
+wine_pam <- pam(x=wine_daisy_matrix, diss=TRUE, k=3)
+
+mds_coords <- cmdscale(wine_daisy, k = 3)
+
+mds_pam <- data.frame(
+  Dim1 = mds_coords[,1],
+  Dim2 = mds_coords[,2],
+  Cluster = factor(wine_pam$clustering),  # wyniki PAM
+  Class = factor(wine$class)              # rzeczywiste klasy
+)
+
+# Wykres rozrzutu: kolor = klaster PAM, kształt = rzeczywista klasa
+ggplot(mds_pam, aes(x = Dim1, y = Dim2, color = Cluster, shape = Class)) +
+  geom_point(size = 3, alpha = 0.8) +
+  labs(title = "",
+       x = "Wymiar 1", y = "Wymiar 2") +
+  theme_minimal() +
+  scale_color_brewer(palette = "Set1")
+```
+W tym przypadku zastosowano metodę `MDS`, aby przedstawić dane wielowymiarowe na dwuwymiarowym wykresie rozrzutu. Ponieważ dane po skalowaniu mają aż *13* cech liczbowych, bez redukcji wymiaru ich bezpośrednia wizualizacja byłaby niemożliwa.
+W tym przypadku użycie `MDS` jest możliwe, ponieważ dane są ciągłe, numeryczne i przeskalowane, dzięki czemu odległość euklidesowa dobrze oddaje podobieństwa między obiektami. Zbiór zawiera stosunkowo niewielką liczbę obserwacji (*178*), co pozwala `MDS` efektywnie odwzorować relacje między nimi bez dużej utraty informacji.
+
+Na podstawie wykresu przedstawiającego wyniki grupowania metodą `PAM` w przestrzeni dwuwymiarowej, można sformułować kilka istotnych obserwacji dotyczących własności otrzymanych skupień oraz ich zgodności z rzeczywistym podziałem na klasy.
+
+Po pierwsze, skupienia wykazują bardzo dobrą separację. Obiekty należące do różnych klastrów tworzą wyraźnie odseparowane grupy w przestrzeni dwuwymiarowej. Szczególnie widoczna jest granica między klastrem czerwonym i zielonym. Taka wyraźna separacja wskazuje, że metoda `PAM` skutecznie rozpoznała strukturę skupień w danych. Dodatkowo skupienia są zwarte, obiekty w ramach każdego klastra są do siebie blisko rozmieszczone, co świadczy o ich jednorodności i wewnętrznej spójności.
+\newpage
+Jeśli chodzi o zgodność uzyskanych skupień z rzeczywistym podziałem na klasy, to jest ona dobra, ale nie idealna. Klasa 1 w całości odpowiada klastrowi czerwonymu, klasa 2 jest w większości przypisana do klastra niebieskiego, ale zauważalne są obserwacje odstające przypisane, też do innych klastrów. Klasa 3 w całości została przypisana do klastra zielonego. Oznacza to, że metoda `PAM` przy liczbie klastrów równej trzy dobrze odwzorowała rzeczywisty podział na klasy 1 i 3, lecz miała problemy z klasą 2. Sugeruje to, że algorytm nie był w stanie jednoznacznie przypisać tej klasy do jednego skupienia.
+
+## Algorytm AGNES
+```{r, echo=FALSE, fig.cap="Skupienia algorytmem AGNES na przestrzeni MDS dla różnych metod", fig.height= 8, fig.width=6}
+methods <- c("average", "single", "complete")
+plots <- list()
+
+for (method in methods) {
+  agnes_result <- agnes(x = wine_daisy_matrix, diss = TRUE, method = method)
+  
+  # Wytnij drzewo dla K skupień
+  clusters <- cutree(agnes_result, k = 3)
+  
+  # Przygotuj dane do wykresu
+  mds_data <- data.frame(
+    Dim1 = mds_coords[,1],
+    Dim2 = mds_coords[,2],
+    Cluster = factor(clusters),
+    Class = factor(wine$class)
+  )
+  
+  # Stwórz wykres
+  p <- ggplot(mds_data, aes(x = Dim1, y = Dim2, color = Cluster, shape = Class)) +
+    geom_point(size = 3, alpha = 0.8) +
+    labs(title = paste("Metoda:", method),
+         x = "Wymiar 1", y = "Wymiar 2") +
+    theme_minimal() +
+    scale_color_brewer(palette = "Set1")
+  
+  plots[[method]] <- p
+}
+
+
+grid.arrange(grobs = plots, ncol = 1)
+```
+
+```{r, echo=FALSE, fig.cap="Dendogramy różnych metod AGNES"}
+wykresy <- list()
+# Pętla przez wszystkie metody
+for (method in methods) {
+  # Obliczenie aglomeracji
+  agnes_result <- agnes(x = wine_daisy_matrix, diss = TRUE, method = method)
+  
+  # Konwersja do dendrogramu i kolorowanie gałęzi
+  dendro <- as.dendrogram(agnes_result)
+  dendro <- color_branches(dendro, k = 3, col = c("red", "lightgreen", "lightblue"))
+  
+  # Konwersja dendrogramu do formatu ggdend (z zachowaniem kolorów)
+  ggdend <- as.ggdend(dendro)
+  
+  # Tworzenie wykresu z ggplot
+  wykres <- ggplot(ggdend) +
+    coord_flip() +            # Poziome dendrogramy
+    scale_y_reverse() +       # Odwrócenie osi y
+    ggtitle(paste("Metoda:", method)) +
+    theme_minimal() +
+    theme(axis.text = element_blank(),
+          axis.title = element_blank(),
+          panel.grid = element_blank(),
+          plot.title = element_text(hjust = 0.5))
+  
+  # Zapisanie wykresu do listy
+  wykresy[[method]] <- wykres
+}
+
+grid.arrange(grobs = wykresy, ncol = 3)
+```
+Podobnie jak w poprzednim przypadku została zastosowana `MDS` do redukcji wymiaru. Analizując zarówno wykresy, jak i dendrogramy przedstawiające wyniki grupowania hierarchicznego algorytmem `AGNES` dla metod `average`, `single` oraz `complete` na zbiorze danych `wine`, można zauważyć istotne różnice w podstawowych własnościach otrzymanych skupień. 
+
+Metoda `average` polega na obliczaniu średniej odległości między wszystkimi parami punktów należącymi do różnych skupień. Na wykresach i dendrogramach widać, że większość obiektów została przypisana do jednego dużego klastra, przez co jednorodność i separacja między klastrami są ograniczone. Powoduje to niewielką zgodność wynikowych klastrów z rzeczywistą przynależnością obiektów do klas, co oznacza, że ta metoda nie odtwarza w pełni struktury klas obecnych w danych.
+
+Metoda `single` definiuje odległość pomiędzy skupieniami jako najmniejszą odległość między dowolną parą punktów, po jednej z każdego skupienia. Skutkuje to efektem „łańcuchowania", czyli łączeniem skupień jedno po drugim na podstawie pojedynczych bliskich sobie punktów. Dendrogram dla tej metody jest najbardziej rozciągnięty, a wykresy pokazują, że niemal wszystkie obiekty również trafiają do jednego dużego klastra. Takie skupienia są mało zwarte, mają rozmyte granice, są bardzo wrażliwe na pojedyncze punkty i nie odpowiadają dobrze rzeczywistej strukturze klas.
+
+\newpage
+Metoda `complete` polega na braniu pod uwagę maksymalnej odległości pomiędzy punktami z różnych skupień. Dzięki temu uzyskane skupienia są wyraźnie bardziej zwarte, jednorodne i lepiej odseparowane od siebie, co można zobaczyć zarówno na dendrogramach, jak i na wykresach `MDS`. Gałęzie na dendrogramie są bardziej zwarte, a na wykresach grupy są lepiej oddzielone i bardziej jednorodne pod względem przypisania do rzeczywistych klas. Choć także w przypadku tej metody nie uzyskuje się idealnego pokrycia klastrów z rzeczywistymi klasami, to jednak podział jest zdecydowanie bardziej zgodny z rzeczywistą strukturą zbioru `wine`.
+
+## Ocena jakości grupowania
+### Wskaźniki wewnętrzne
+```{r,echo=FALSE, fig.cap="Wartość silhouette dla PAM i AGNES"}
+K_range <- 2:6
+
+# PAM
+pam_sil <- sapply(K_range, function(k) {
+  pam_fit <- pam(wine_daisy_matrix, diss = TRUE, k = k)
+  mean(silhouette(pam_fit$clustering, wine_daisy_matrix)[, 3])
+})
+
+# AGNES dla różnych metod spajania
+agnes_methods <- c("average", "complete", "single")
+agnes_sil <- sapply(agnes_methods, function(met) {
+  sapply(K_range, function(k) {
+    agnes_fit <- agnes(wine_daisy_matrix, diss = TRUE, method = met)
+    clusters <- cutree(as.hclust(agnes_fit), k = k)
+    mean(silhouette(clusters, wine_daisy_matrix)[, 3])
+  })
+})
+
+cols <- c("blue", "red", "green", "purple")
+plot(K_range, pam_sil, type='b', pch=19, col=cols[1], ylim=range(c(pam_sil, agnes_sil)),
+     xlab = "Liczba klastrów (K)", ylab = "Średni indeks silhouette",
+     main = "")
+lines(K_range, agnes_sil[,1], type='b', pch=17, col=cols[2])
+lines(K_range, agnes_sil[,2], type='b', pch=15, col=cols[3])
+lines(K_range, agnes_sil[,3], type='b', pch=18, col=cols[4])
+legend("topright", legend = c("PAM", "AGNES-average", "AGNES-complete", "AGNES-single"),
+       col = cols, pch = c(19,17,15,18), cex=0.7)
+```
+
+### Wskaźniki zewnętrzne
+```{r,echo=FALSE, fig.cap="Zgodność grupowania z klasami"}
+# ARI (zgodność z klasami) dla PAM
+pam_ari <- sapply(K_range, function(k) {
+  pam_fit <- pam(wine_daisy_matrix, diss = TRUE, k = k)
+  adjustedRandIndex(pam_fit$clustering, wine$class)
+})
+
+# AGNES (average, complete, single)
+agnes_methods <- c("average", "complete", "single")
+agnes_ari <- sapply(agnes_methods, function(met) {
+  sapply(K_range, function(k) {
+    agnes_fit <- agnes(wine_daisy_matrix, diss = TRUE, method = met)
+    clusters <- cutree(as.hclust(agnes_fit), k = k)
+    adjustedRandIndex(clusters, wine$class)
+  })
+})
+
+cols <- c("blue", "red", "green", "purple")
+plot(K_range, pam_ari, type='b', pch=19, col=cols[1], ylim = c(0,1),
+     xlab = "Liczba klastrów (K)", ylab = "ARI (zgodność z klasami)",
+     main = "")
+lines(K_range, agnes_ari[,1], type='b', pch=17, col=cols[2])
+lines(K_range, agnes_ari[,2], type='b', pch=15, col=cols[3])
+lines(K_range, agnes_ari[,3], type='b', pch=18, col=cols[4])
+legend("topright", legend = c("PAM", "AGNES-average", "AGNES-complete", "AGNES-single"),
+       col = cols, pch = c(19,17,15,18), cex = 0.7)
+```
+
+Na podstawie przedstawionych wykresów można stwierdzić, że najlepsze rezultaty grupowania dla zbioru danych `wine` uzyskano, stosując algorytm `PAM` lub algorytm `AGNES` z metodą complete.
+
+W przypadku wskaźnika silhouette `Rysunek 7`, który mierzy zwartość i separację skupień, najwyższe wartości osiągnięto dla algorytmu `PAM` przy liczbie klastrów równej *3*. Wartość silhouette dla pozostałych metod jest niższa niezależnie od liczby klastrów, co świadczy o mniejszej czytelności i zwartości otrzymanych podziałów.
+
+Drugim istotnym wskaźnikiem jest `ARI` (Adjusted Rand Index), który przedstawia zgodność grupowania z rzeczywistym podziałem na klasy `Rysunek 8`. Najwyższe wartości `ARI` obserwowane są dla `PAM` oraz `AGNES` complete przy odpowiednio liczbie klastrów *3* dla `PAM` oraz *5* dla `AGNES`, co oznacza, że te algorytmy najlepiej odwzorowują rzeczywistą strukturę danych. W szczególności algorytm `PAM` osiąga bardzo wysoką wartość `ARI` przy *3*, a metoda `AGNES` complete daje rezultaty tylko nieznacznie gorsze. Metody `AGNES` average i `AGNES` single charakteryzują się bardzo niską zgodnością niezależnie od przyjętego `K` i nie odwzorowują poprawnie rzeczywistego podziału na klasy.
+
+## Interpretacja wyników grupowania
+```{r, echo=FALSE}
+# Wyznaczenie skupień dla K=3
+pam_fit <- pam(wine_daisy_matrix, diss = TRUE, k = 3)
+agnes_fit <- agnes(wine_daisy_matrix, diss = TRUE, method = "complete")
+agnes_clusters <- cutree(as.hclust(agnes_fit), k = 3)
+
+# Dodanie etykiet klastrów do danych
+wine$Cluster_PAM <- as.factor(pam_fit$clustering)
+wine$Cluster_AGNES_Complete <- as.factor(agnes_clusters)
+
+# Średnie cech w klastrach PAM
+pam_means <- wine %>%
+  group_by(Cluster_PAM) %>%
+  summarise(across(where(is.numeric), mean, na.rm = TRUE)) %>%
+  rename(Klaster = Cluster_PAM)
+
+kbl(pam_means, format = 'latex', caption = "Średnie wartości cech w klastrach PAM (K=3)", digits = 0) %>%
+  kable_styling(latex_options = "HOLD_position", bootstrap_options = c("striped", "hover", "condensed"))
+
+# Średnie cech w klastrach AGNES-complete
+agnes_means <- wine %>%
+  group_by(Cluster_AGNES_Complete) %>%
+  summarise(across(where(is.numeric), mean, na.rm = TRUE)) %>%
+  rename(Klaster = Cluster_AGNES_Complete)
+
+kbl(agnes_means, format = 'latex', caption = "Średnie wartości cech w klastrach AGNES-complete (K=3)", digits = 0) %>%
+  kable_styling(latex_options = "HOLD_position", bootstrap_options = c("striped", "hover", "condensed"))
+```
+
+```{r,echo=FALSE, fig.cap="Rozkłady cech V1-V6 w klastrach (PAM)", fig.height= 8, fig.width=6}
+features <- c("V1", "V2", "V3", "V4", "V5", "V6")
+
+plots <- lapply(features, function(f) {
+  ggplot(wine, aes_string(x = "Cluster_PAM", y = f, fill = "Cluster_PAM")) +
+    geom_boxplot(alpha = 0.6) +
+    theme_minimal() +
+    labs(title = paste("Rozkład cechy", f, "w PAM"),
+         x = "Klaster PAM", y = f) +
+    theme(legend.position = "none")
+})
+
+grid.arrange(grobs = plots, ncol = 2, nrow = 3)
+```
+
+Na podstawie wskaźników oceny jakości grupowania ustalono, że optymalną liczbą skupień w analizowanym zbiorze wine jest *3*, a najlepsze rezultaty uzyskano stosując algorytm `PAM`.
+
+Analizując średnie wartości cech dla poszczególnych klastrów (`tabela 10` dla `PAM` oraz `tabela 11` dla `AGNES`), można zauważyć, że każda z wyodrębnionych grup istotnie różni się pod względem przynajmniej kilku zmiennych opisujących próbki wina. Przykładowo:
+
+  - Klaster *1* w obu metodach charakteryzuje się wyższymi średnimi wartościami cechy `V1`, `V3`, `V4` oraz `V5`, co może świadczyć o wyższej zawartości danego składnika lub intensywności konkretnej właściwości produktu w tym skupieniu.
+
+  - Klaster *2* wyróżnia się relatywnie niższymi wartościami większości cech, zwłaszcza `V1`, `V3`, `V5` i `V13`, co potwierdzają zarówno zestawienia średnich, jak i wykresy pudełkowe. Na wykresach wyraźnie widać, że obiekty w tym klastrze mają niższe wartości np. dla cech `V1` i `V5`.
+
+  - Klaster *3* prezentuje natomiast nieco wyższe wartości cech `V1`, `V4` i `V13` w porównaniu do klastra *2*, lecz niższe niż klaster *1*, co świadczy o pośrednim “profilu” tej grupy.
+
+Wykresy pudełkowe dla cech `V1`–`V6` pozwalają jeszcze lepiej zobrazować te różnice, zaobserwować można wyraźne oddzielenie rozkładów poszczególnych cech dla różnych klastrów, zwłaszcza pod względem poziomu i rozrzutu wartości, co potwierdza trafność dokonanego podziału i sugestię, że skupienia są pod względem tych parametrów wewnętrznie jednorodne, a zróżnicowane między sobą.
+
+```{r, echo=FALSE}
+#pam_fit$medoids
+
+medoids <- wine[pam_fit$medoids, c("V1", "V2", "V3", "V4", "V5", "V6", "V7", "V8", "V9", "V10", "V11", "V12", "V13", "Cluster_PAM")]
+
+kbl(medoids, format = 'latex', caption = "Obiekty-medoidy w PAM wraz z wartościami cech", digits = 0) %>%
+  kable_styling(latex_options = "HOLD_position", bootstrap_options = c("striped", "hover", "condensed"))
+```
+
+W przypadku metody `PAM` istotnym elementem interpretacji jest identyfikacja medoidów, czyli najbardziej reprezentatywnych obserwacji dla każdego klastra (`tabela 12`). Dla każdej z trzech grup wskazano konkretny obiekt, który najlepiej odzwierciedla typowy profil cech danej grupy. Analizując wartości cech tych medoidów, można zobaczyć, że:
+
+  - Medoid klastra *1* charakteryzuje się najwyższymi wartościami cech `V1`, `V5` i `V13`, co jest spójne z ogólną charakterystyką tego skupienia i potwierdza obecność w tej grupie “najbogatszych” pod względem tych cech win.
+
+  - Medoid klastra *2* odznacza się najniższymi wartościami większości cech, przede wszystkim `V5` i `V13`, co czyni go typowym reprezentantem grupy mniej “intensywnej” kompozycyjnie.
+
+  - Medoid klastra *3* prezentuje wartości pośrednie z wyraźnie podwyższoną cechą `V4` i relatywnie wysokim `V13`.
+
+## Podsumowanie
+Podsumowując, przeprowadzona analiza pozwala uznać, że zarówno algorytm `PAM`, jak i `AGNES` z metodą complete skutecznie oddzieliły od siebie grupy próbek wina charakteryzujące się różnym poziomem wybranych cech chemicznych. Jednocześnie, wskazane medoidy w metodzie `PAM` dobrze reprezentują typowe właściwości swoich klastrów i dodatkowo ułatwiają interpretację, pozwalają wskazać “wzorcowe” obserwacje, które stanowią punkt odniesienia dla danej grupy. Całość potwierdza wysoką spójność wewnętrzną oraz wyraźne zróżnicowanie między klastrami w wyselekcjonowanych wymiarach.

@@ -1,0 +1,581 @@
+---
+title: "Dyskretyzacja, PCA, MDS"
+author: "Ksawery Józefowski, 277513"
+date: "`r Sys.Date()`"
+output:
+  pdf_document:
+    keep_tex: true
+    toc: true
+    fig_caption: true
+    fig_width: 5
+    fig_height: 4
+    number_sections: true
+  html_document:
+    toc: true
+    df_print: paged
+header-includes:
+- \usepackage[OT4]{polski}
+- \usepackage[utf8]{inputenc}
+- \usepackage{graphicx}
+- \usepackage{float}
+subtitle: "Eksploracja danych - Lista nr 2"
+fontsize: 12pt
+---
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, fig.cap = "")
+knitr::opts_chunk$set(warning = FALSE, message = FALSE) 
+knitr::opts_chunk$set(fig.pos = "H", out.extra = "", fig.align = "center")
+```
+
+```{r, echo=FALSE, results='hide'}
+# Biblioteki
+library(dplyr)
+library(tidyverse)
+library(datasets)
+library(ggplot2)
+library(arules)
+library(titanic)
+library(kableExtra)
+library(gridExtra)
+library(knitr)
+library(cluster)
+library(MASS)
+library(factoextra)
+library(corrplot)
+library(ggcorrplot)
+```
+
+\newpage
+# Zadanie nr 1
+## Wprowadzenie
+Przeprowadzamy analizę procesu *dyskretyzacji* cech ciągłych w zbiorze danych `iris`. 
+Celem jest porównanie skuteczności różnych metod nienadzorowanej dyskretyzacji:
+
+1. Equal Width
+
+2. Equal Frequency
+
+3. K-means clustering
+
+```{r, echo=FALSE}
+# Wczytanie danych
+data("iris")
+```
+
+## Statystyki Opisowe
+```{r, echo=FALSE}
+# Statystyki opisowe
+kbl(summary(iris),format = 'latex', caption = "Statystyki opisowe zbioru Iris", digits=2) %>% 
+          kable_styling(latex_options = "HOLD_position", bootstrap_options = c("striped", "hover", "condensed"))
+```
+Z `Tabla 1` wynika, że średnie wartości dla:
+
+  - `Sepal` to `Width` - 3.06 i `Length` - 5.84
+  - `Petal` to `Width` - 1.20 i `Length` - 3.76
+  
+Można z tego wywnioskować, że wymiary `Petal` wykazują większą zmienność.
+
+Przejdźmy teraz do rozkładów zmiennych.
+
+\newpage
+```{r plot1, fig.cap="Rozkłady cech", echo=FALSE, fig.width=8, fig.height=10, fig.label="fig:plot1"}
+# Rozkłady cech
+p1 <- ggplot(iris, aes(x=Sepal.Length, fill=Species)) + 
+  geom_density(alpha=0.5) +
+  ggtitle("Rozkład Sepal.Length")
+
+p2 <- ggplot(iris, aes(x=Sepal.Width, fill=Species)) + 
+  geom_density(alpha=0.5) +
+  ggtitle("Rozkład Sepal.Width")
+
+p3 <- ggplot(iris, aes(x=Petal.Length, fill=Species)) + 
+  geom_density(alpha=0.5) +
+  ggtitle("Rozkład Petal.Length")
+
+p4 <- ggplot(iris, aes(x=Petal.Width, fill=Species)) + 
+  geom_density(alpha=0.5) +
+  ggtitle("Rozkład Petal.Width")
+
+grid.arrange(p1, p2, p3, p4, ncol = 1)
+```
+Z \ref{fig:plot1} obserwujemy, że wymiary dla `Petal` prawie wcale nie pokrywają się gatunkowo.
+
+## Wybór Cech
+Na podstawie analizy statystyk opisowych możemy wybrać cechy dyskryminujące:
+
+  - *Najlepsza* cecha dyskryminująca to `Petal.Length`
+  - *Najgorsza* cecha dyskryminująca to `Sepal.Width`
+
+## Implementacja metod
+```{r, echo=FALSE}
+# Dyskretyzacja cech
+iris$Petal.Length_eqwidth <- discretize(iris$Petal.Length, method = 'interval', breaks=3)
+iris$Petal.Length_eqfreq <- discretize(iris$Petal.Length, method = 'frequency', breaks=3)
+iris$Petal.Length_kmeans <- discretize(iris$Petal.Length, method = 'cluster', breaks=3)
+iris$Petal.Length_user <- discretize(iris$Petal.Length, method = "fixed", 
+      breaks = c(-Inf, 2, 5, Inf), labels = c("small","medium", "large"))
+
+iris$Sepal.Width_eqwidth <- discretize(iris$Sepal.Width, method = 'interval', breaks=3)
+iris$Sepal.Width_eqfreq <- discretize(iris$Sepal.Width, method = 'frequency', breaks=3)
+iris$Sepal.Width_kmeans <- discretize(iris$Sepal.Width, method = 'cluster', breaks=3)
+iris$Sepal.Width_user <- discretize(iris$Sepal.Width, method = "fixed", 
+      breaks = c(-Inf, 2, 5, Inf), labels = c("small","medium", "large"))
+```
+Wybrane prez nas cechy dyskretyzujemy za pomocą funkcji `discretize` na 4 różne metody. Zwizualizujemy je za pomocą wykresów rozrzutu.
+```{r, echo=FALSE, fig.width=8, fig.height=12, fig.cap="Porównanie metod"}
+par(mfrow = c(4, 1), mar = c(4, 4, 2, 1)) 
+
+# Funkcja do znajdowania granic przedziałów z istniejących danych zdyskretyzowanych
+get_breaks <- function(original_data, discretized_var) {
+  levels <- levels(discretized_var)
+  breaks <- sapply(levels, function(lvl) max(original_data[discretized_var == lvl]))
+  c(min(original_data), breaks)
+}
+# Wykresy dla Petal.Length
+n <- length(iris$Petal.Length)
+y <- runif(n)
+
+# 1. Equal Width
+breaks <- get_breaks(iris$Petal.Length, iris$Petal.Length_eqwidth)
+plot(iris$Petal.Length, y, 
+     col = as.numeric(iris$Species), pch = 19,
+     main = "Metoda: Equal Width (Petal.Length)",
+     xlab = "Petal.Length", ylab = "")
+abline(v = breaks, col = "red", lwd = 2)
+legend("topright", legend = levels(iris$Species), col = 1:3, pch = 25, cex = 1.5)
+
+# 2. Equal Frequency
+breaks <- get_breaks(iris$Petal.Length, iris$Petal.Length_eqfreq)
+plot(iris$Petal.Length, y, 
+     col = as.numeric(iris$Species), pch = 19,
+     main = "Metoda: Equal Frequency (Petal.Length)",
+     xlab = "Petal.Length", ylab = "")
+abline(v = breaks, col = "red", lwd = 2)
+
+# 3. K-means
+breaks <- get_breaks(iris$Petal.Length, iris$Petal.Length_kmeans)
+plot(iris$Petal.Length, y, 
+     col = as.numeric(iris$Species), pch = 19,
+     main = "Metoda: K-means (Petal.Length)",
+     xlab = "Petal.Length", ylab = "")
+abline(v = breaks, col = "red", lwd = 2)
+
+# 4. User
+breaks <- get_breaks(iris$Petal.Length, iris$Petal.Length_user)
+plot(iris$Petal.Length, y, 
+     col = as.numeric(iris$Species), pch = 19,
+     main = "Metoda: fixed with user breaks (Petal.Length)",
+     xlab = "Petal.Length", ylab = "")
+abline(v = breaks, col = "red", lwd = 2)
+
+# Wykresy dla Sepal.Width
+n <- length(iris$Sepal.Width)
+y <- runif(n)
+
+# 1. Equal Width
+breaks <- get_breaks(iris$Sepal.Width, iris$Sepal.Width_eqwidth)
+plot(iris$Sepal.Width, y, 
+     col = as.numeric(iris$Species), pch = 19,
+     main = "Metoda: Equal Width (Sepal.Width)",
+     xlab = "Sepal.Width", ylab = "")
+abline(v = breaks, col = "red", lwd = 2)
+legend("topright", legend = levels(iris$Species), col = 1:3, pch = 25, cex = 1.5)
+
+# 2. Equal Frequency
+breaks <- get_breaks(iris$Sepal.Width, iris$Sepal.Width_eqfreq)
+plot(iris$Sepal.Width, y, 
+     col = as.numeric(iris$Species), pch = 19,
+     main = "Metoda: Equal Frequency (Sepal.Width)",
+     xlab = "Sepal.Width", ylab = "")
+abline(v = breaks, col = "red", lwd = 2)
+
+# 3. K-means
+breaks <- get_breaks(iris$Sepal.Width, iris$Sepal.Width_kmeans)
+plot(iris$Sepal.Width, y, 
+     col = as.numeric(iris$Species), pch = 19,
+     main = "Metoda: K-means (Sepal.Width)",
+     xlab = "Sepal.Width", ylab = "")
+abline(v = breaks, col = "red", lwd = 2)
+
+# 4. user
+breaks <- get_breaks(iris$Sepal.Width, iris$Sepal.Width_user)
+plot(iris$Sepal.Width, y, 
+     col = as.numeric(iris$Species), pch = 19,
+     main = "Metoda: fixed with user breaks (Sepal.Width)",
+     xlab = "Sepal.Width", ylab = "")
+abline(v = breaks, col = "red", lwd = 2)
+```
+
+## Ocena skuteczności
+```{r, echo=FALSE}
+# Funkcja do oceny skuteczności
+calculate_accuracy <- function(discretized, actual) {
+  tbl <- table(discretized, actual)
+  sum(diag(tbl)) / sum(tbl)
+}
+
+# Obliczenie dokładności
+acc_pl_eqwidth <- calculate_accuracy(iris$Petal.Length_eqwidth, iris$Species)
+acc_pl_eqfreq <- calculate_accuracy(iris$Petal.Length_eqfreq, iris$Species)
+acc_pl_kmeans <- calculate_accuracy(iris$Petal.Length_kmeans, iris$Species)
+acc_pl_user <- calculate_accuracy(iris$Petal.Length_user, iris$Species)
+
+acc_sw_eqwidth <- calculate_accuracy(iris$Sepal.Width_eqwidth, iris$Species)
+acc_sw_eqfreq <- calculate_accuracy(iris$Sepal.Width_eqfreq, iris$Species)
+acc_sw_kmeans <- calculate_accuracy(iris$Sepal.Width_kmeans, iris$Species)
+acc_sw_user <- calculate_accuracy(iris$Sepal.Width_user, iris$Species)
+
+# Zestawienie wyników
+results <- data.frame(
+  Method = rep(c("Equal Width", "Equal Frequency", "K-means", "Fixed"), 2),
+  Feature = rep(c("Petal.Length", "Sepal.Width"), each = 4),
+  Accuracy = c(acc_pl_eqwidth, acc_pl_eqfreq, acc_pl_kmeans, acc_pl_user, acc_sw_eqwidth, acc_sw_eqfreq, acc_sw_kmeans, acc_sw_user)
+)
+
+kable(results, format = 'latex', caption = "Skuteczność dyskretyzacji różnych metod", digits = 2) %>% 
+          kable_styling(bootstrap_options = c("striped", "hover", "condensed"), latex_options = "HOLD_position")
+```
+
+Z `Tabela 2` wnioskujemy, że najbardziej dokładną metodą dyskretyzacji była `Equal Frequency` dla `Petal.Length`.
+Wyniki dla wybranej *Najlepszej* i *Najgorszej* cechy różnią się istotnie i wskazują, że `Sepal.Width` słabo odzwierciedla podział na klasy.
+
+\newpage
+# Zadanie nr 2
+## Wprowadzenie
+W tym zadaniu zastosujemy PCA do zbioru danych dotyczących jakości życia w różnych miastach świata. Celem analizy było zidentyfikowanie głównych czynników różnicujących miasta oraz redukcja wymiarowości danych.
+
+## Analiza wariacji zmiennych
+```{r, echo=FALSE, results='hide', fig.cap="Przed i po standaryzacji"}
+par(mfrow = c(2, 1), mar = c(0, 4, 2, 1)) 
+# Wczytanie danych
+data <- read_csv("uaScoresDataFrame.csv")
+
+# Pozbycie sie id
+data <- data[, -which(names(data) == "...1")]
+
+# Wybór tylko kolumn numerycznych (pomijamy kolumny z informacjami o lokalizacji)
+numeric_data <- data %>% dplyr::select(where(is.numeric))
+
+# Sprawdzenie brakujących wartości
+sum(is.na(numeric_data))
+
+# Wykresy pudełkowe przed standaryzacją
+boxplot(numeric_data, main = "Rozkład zmiennych przed standaryzacją", las = 2, xaxt = "n")
+
+# Obliczenie wariancji dla każdej zmiennej
+apply(numeric_data, 2, var)
+
+# Standaryzacja danych 
+scaled_data <- scale(numeric_data)
+
+# Wykresy pudełkowe po standaryzacji
+boxplot(scaled_data, main = "Rozkład zmiennych po standaryzacji", las = 2, xaxt = "n")
+```
+Na podstawie wykresu pudełkowego widać, że zmienne mają różne wariancje przed standaryzacją. Po standaryzacji wszystkie zmienne mają podobny rozrzut, co jest pożądane w analizie PCA.
+
+## Składowe Główne
+```{r, echo=FALSE, fig.cap="Wykresy głównych składowych", fig.width=8, fig.height=10}
+# PCA na danych standaryzowanych
+pca_result <- prcomp(scaled_data, center = TRUE, scale. = TRUE)
+
+# Tworzymy ramkę danych z wartościami składowych głównych
+pca_scores <- as.data.frame(pca_result$x[,1:3])
+
+# Konwertujemy do formatu długiego dla ggplot2
+pca_scores_long <- pivot_longer(pca_scores, cols = everything(), names_to = "PC", values_to = "Value")
+
+# Wykres pudełkowy
+p1 <- ggplot(pca_scores_long, aes(x = PC, y = Value)) +
+  geom_boxplot(fill = "lightblue", outlier.color = "red") +
+  labs(title = "Rozrzut wartości dla pierwszych trzech składowych",
+       x = "Składowa główna",
+       y = "Wartość składowej") +
+  theme_minimal()
+
+# scree plot
+p2 <- fviz_eig(pca_result, 
+         title = "Wykres osypiska dla głównych składowych",
+         addlabels = TRUE, 
+         ylim = c(0, 50),
+         barfill = "steelblue",
+         barcolor = "steelblue",
+         linecolor = "red") +
+  geom_hline(yintercept = 80, linetype = "dashed", color = "red") +
+  labs(title = "",
+       x = "Składowe główne",
+       y = "Procent wyjaśnionej wariancji") +
+  theme_minimal()
+
+grid.arrange(p1, p2, ncol = 1)
+# Ładunki (macierz rotacji)
+loadings <- pca_result$rotation
+# Tabela z ładunkami dla pierwszych 3 składowych
+loadings_table <- loadings[,1:3]
+
+# Wyświetlenie tabeli
+kable(loadings_table, digits = 3, caption = "Ładunki (Loadings) dla PC1, PC2, PC3") %>% 
+          kable_styling(bootstrap_options = c("striped", "hover", "condensed"), latex_options = "HOLD_position")
+
+```
+Analizując wyniki otrzymane możemy wywnioskować, że pierwsze 3 główne składowe wyjaśniają odpowiednio 30%, 15% i 12% wariancji danych, co łącznie daje nam 57% wyjaśnionej wariancji. Rozkład wartości składowych pokazuje, że `PC1` ma najszerszy rozrzut (od -2.5 do 5.0), co potwierdza jej dominujący udział w wyjaśnianiu zmienności danych. Kolejne składowe mają coraz mniejszy rozrzut wartości.
+
+### Interpretacja PC1
+Ta składowa wyraźnie przeciwstawia dobre warunki mieszkaniowe i niższe koszty utrzymania (wartości dodatnie) wysokiej jakości edukacji i swobodzie biznesowej (wartości ujemne). Można ją interpretować jako wymiar "przystępności życiowej".
+
+### Interpretacja PC2
+Ta składowa pokazuje napięcie między otwartością społeczną i bezpieczeństwem a dynamicznym środowiskiem biznesowym i kulturalnym. Ukazuje ona Społeczno-kulturalny vs. biznesowy charakter miasta
+
+### Interpretacja PC3
+Wymiar ten łączy kwestie mobilności (dojazdy, łączność podróżniczą) z czynnikami ekonomicznymi, pokazując kompromis między dostępnością transportu a warunkami mieszkaniowymi.
+
+### Liczba składowych potrzebnych do wyjaśnienia wariancji
+```{r, echo=FALSE, fig.cap="Wykres wariancji"}
+par(mfrow = c(1, 1), mar = c(4, 4, 2, 1)) 
+# Przykładowy kod do generowania poprawnego wykresu
+variance_percent <- c(29.8, 15.2, 12.2, 7.6, 7.0, 4.1, 3.9, 3.4, 2.5, 2.3)
+cumulative <- cumsum(variance_percent)
+
+plot(1:10, variance_percent, 
+     type = "b", col = "blue", 
+     xlab = "Numer składowej głównej", 
+     ylab = "Procent wyjaśnionej wariancji",
+     ylim = c(0, 100),
+     main = "Rozkład wyjaśnionej wariancji")
+
+lines(1:10, cumulative, type = "b", col = "red")
+abline(h = 80, col = "green", lty = 2)
+abline(h = 90, col = "purple", lty = 2)
+legend("right",
+       legend = c("Wariancja indywidualna", "Wariancja skumulowana", 
+                 "Próg 80%", "Próg 90%"),
+       col = c("blue", "red", "green", "purple"),
+       lty = c(1, 1, 2, 2),
+       cex = 0.9)
+```
+Z wykresu możemy wyczytać, że aby wyjaśnić:
+
+  - *80%* wariancji potrzebujemy 7 składowych głównych
+  - *90%* wariancji potrzebujemy 10 składowych głównych
+  
+\newpage
+## Wizualizacja danych wielowymiarowych
+```{r,echo=FALSE, fig.cap="Wizualizacja danych"}
+# Przygotowanie danych do wizualizacji
+pca_df <- data.frame(
+  PC1 = pca_result$x[,1],
+  PC2 = pca_result$x[,2],
+  PC3 = pca_result$x[,3],
+  Miasto = data$UA_Name,
+  Kontynent = data$UA_Continent,
+  Kraj = data$UA_Country
+)
+summary_pca <- summary(pca_result)
+# Dodanie informacji o odległościach od centroidów (do identyfikacji outlierów)
+distances <- sqrt(rowSums(pca_result$x[,1:3]^2))
+pca_df$Odleglosc <- distances
+```
+```{r,echo=FALSE}
+ggplot(pca_df, aes(x = PC1, y = PC2, color = Kontynent)) +
+  geom_point(size = 3, alpha = 0.7) +
+  geom_text(aes(label = ifelse(Odleglosc > quantile(Odleglosc, 0.9), Miasto, "")), 
+            hjust = 0, vjust = 0, size = 3, check_overlap = TRUE) +
+  scale_color_brewer(palette = "Set1") +
+  labs(title = "Wizualizacja PC1 vs PC2",
+       x = paste0("PC1 (", round(summary_pca$importance[2,1]*100, 1), "% wariancji)"),
+       y = paste0("PC2 (", round(summary_pca$importance[2,2]*100, 1), "% wariancji)")) +
+  theme_minimal() +
+  theme(legend.position = "bottom")
+```
+```{r,echo=FALSE}
+# Wybór najbardziej charakterystycznych miast
+top_cities <- pca_df %>%
+  dplyr::arrange(desc(Odleglosc)) %>%
+  head(10) %>%
+  dplyr::select(Miasto, Kraj, Kontynent, PC1, PC2, PC3)
+
+kable(top_cities, caption = "Najbardziej charakterystyczne miasta w analizie PCA") %>% 
+          kable_styling(bootstrap_options = c("striped", "hover", "condensed"), latex_options = "HOLD_position")
+```
+Na podstawie wykresów obserwujemy wyraźne skupiska miast o podobnych charakterystykach. Miasta z tego samego regionu geograficznego wykazują znaczące podobieństwo w przestrzeni składowych głównych, co sugeruje wspólne wzorce w:
+Strukturze kosztów życia,
+Jakości usług publicznych,
+Rozwoju infrastruktury,
+Środowisku biznesowym.
+  
+Wyłania się wyraźny obraz naturalnego grupowania miast według kryteriów geograficznych i społeczno-ekonomicznych. Przestrzeń wyznaczona przez pierwsze dwie składowe główne (PC1 i PC2) odsłania fascynujące prawidłowości w rozmieszczeniu ośrodków miejskich, przy czym aż 45% całkowitej zmienności danych tłumaczą właśnie te dwa wymiary.
+
+*Naturalne skupiska* miejskie układają się w charakterystyczne konstelacje:
+
+  - *Europejski archipelag* skupia się w prawym górnym kwadrancie, z Andorą jako jasną gwiazdą (PC1=3.90, PC2=2.31), odzwierciedlającą model zrównoważonego rozwoju alpejskiego. Miasta te łączy korzystny bilans między standardem życia a kosztami utrzymania.
+  - *Amerykańskie megapolis* jak Nowy Jork (PC1=-4.15) i Los Angeles (PC1=-3.20) tworzą zwartą grupę w lewym dolnym rogu, ucieleśniając model metropolii globalnych z wysokimi kosztami, ale i znakomitą infrastrukturą.
+  - *Afrykańskie perły* takie jak Lagos (PC1=4.79) i Dar es Salaam (PC1=4.75) sytuują się w prawym dolnym kwadrancie, prezentując unikalny kompromis między przystępnością cenową a dynamicznym rozwojem.
+  
+*Miasta-outsiderzy* przyciągają uwagę swoim nietypowym położeniem w przestrzeni PCA:
+
+  - *Caracas* - wenezuelska anomalia (PC1=5.14) świeci najjaśniej w rankingu warunków mieszkaniowych, stanowiąc ekonomiczny fenomen w regionie. Jej pozycja sugeruje nieoczekiwanie korzystny stosunek jakości do ceny nieruchomości, co może wynikać ze specyficznej sytuacji gospodarczej kraju.
+  - *San Francisco Bay Area* - technologiczny tygrys (PC2=-3.43) prezentuje skrajny model rozwoju, gdzie niewyobrażalne koszty życia (PC1=-4.04) idą w parze z wyjątkowymi możliwościami biznesowymi (dodatnie PC3=0.78). To miasto przyszłości, które zapłaciło wysoką cenę za swoją innowacyjność.
+  - *Managua* - nikaraguańska niespodzianka (PC2=2.73) błyszczy nieoczekiwanymi wynikami w zakresie usług publicznych, przewyższając wiele bogatszych sąsiadów. Jej pozycja wskazuje na efektywny model zarządzania miejskiego w trudnych warunkach ekonomicznych.
+  
+*Fenomen grupowania* ujawnia głębsze prawidłowości:
+
+  - Kontynenty układają się w charakterystyczne sekwencje wzdłuż osi PC1, od Afryki przez Europę po Amerykę Północną, co odzwierciedla gradient rozwojowy.
+
+  - W obrębie każdego regionu widoczne są lokalne wzorce - np. europejskie miasta alpejskie (Andorra) versus metropolie zachodnie (Londyn).
+
+  - Pozycja miast w przestrzeni PCA koreluje z ich historycznym modelem rozwoju i obecną strategią gospodarczą.
+  
+## Korelacja zmiennych
+```{r, echo=FALSE, fig.cap="Korelacje biplot"}
+par(mfrow = c(1, 1), mar = c(4, 4, 2, 1)) 
+# Generowanie biplotu z wyróżnieniem zmiennych i obserwacji
+# Wersja uproszczona bez elips
+fviz_pca_biplot(pca_result,
+                label="var",
+                col.ind = data$UA_Continent,
+                palette = "jco",
+                repel = TRUE,
+                addEllipses = TRUE,
+                elipse.level=.95) +
+  ggtitle("Biplot PCA") +
+  theme_minimal()
+```
+```{r,echo=FALSE, fig.cap="Macierz Korelacji"}
+cor_matrix <- cor(numeric_data, use = "complete.obs")  # Oblicza macierz korelacji
+cor_matrix <- round(cor_matrix, 2)  # Zaokrągla do 2 miejsc po przecinku
+ggcorrplot(cor_matrix,
+           hc.order = TRUE, 
+           type = "lower",   
+           lab = TRUE,      
+           colors = c("#2b8cbe", "white", "#e34a33"), 
+           outline.color = "gray", 
+           lab_size = 1.5,     
+           digits = 2,     
+           tl.cex = 10,     
+           tl.srt = 45,      
+           pch = 15,         
+           pch.cex = 9,     
+           ggtheme = theme_minimal(base_size = 12)) + 
+  labs(title = "Macierz korelacji") +
+  theme(plot.title = element_text(hjust = 0.5, size = 16, face = "bold"),
+        axis.text.x = element_text(angle = 45, hjust = 1, vjust = 1, size = 8),
+        axis.text.y = element_text(size = 10),
+        legend.text = element_text(size = 10),
+        plot.margin = margin(0, 0, 0, 0, "cm"),
+        panel.grid = element_blank())  # Usuń linie siatki
+```
+Patrząc na biplot, można zauważyć, że zmienne takie jak `Startups`, `Venture Capital`, `Business Freedom` oraz częściowo `Internet Access` są skierowane w podobnym kierunku, co sugeruje silną dodatnią korelację pomiędzy nimi. Również zmienne `Housing` i `Cost of Living` są blisko siebie, co wskazuje na dodatnią zależność. Widać też, że `Environmental Quality` jest skierowane w stronę przeciwną do `Housing` i `Cost of Living`, co sugeruje ujemną korelację między nimi. Ponadto zmienne takie jak `Tolerance`, `Safety` oraz `Environmental Quality` tworzą zgrupowanie, co może świadczyć o ich dodatniej korelacji.
+
+Analizując wyniki macierzy korelacji, można potwierdzić intuicje wyciągnięte z biplotu. Widzimy, że zmienne `Startups` i `Venture Capital` mają bardzo wysoką dodatnią korelację o wartości 0,8. Podobnie zmienne `Cost of Living` i `Housing` cechują się umiarkowaną dodatnią korelacją na poziomie 0,57. W przypadku `Environmental Quality` obserwuje się ujemną korelację zarówno z `Cost of Living` (-0,25), jak i z `Housing` (-0,43). Dodatkowo zmienne `Tolerance` i `Safety` są dodatnio skorelowane ze sobą, osiągając współczynnik korelacji równy 0,43.
+
+Podsumowując, zarówno analiza biplotu PCA, jak i macierzy korelacji prowadzą do spójnych wniosków dotyczących zależności między zmiennymi. Biplot dostarcza graficznej, intuicyjnej interpretacji zależności, natomiast macierz korelacji pozwala je dokładnie zweryfikować za pomocą wartości liczbowych.
+
+## Wnioski
+W przeprowadzonej analizie PCA udało się zaobserwować kilka ciekawych zależności. Przede wszystkim pierwsze trzy składowe główne (PC1, PC2, PC3) wyjaśniają łącznie 57% całkowitej wariancji w danych, z czego PC1 odpowiada za 29,8%, PC2 za 15,2%, a PC3 za 12,2%. W przestrzeni pierwszych dwóch składowych (PC1 i PC2) uwidoczniły się wyraźne skupiska miast, odpowiadające ich położeniu geograficznemu oraz charakterystyce społeczno-ekonomicznej. Przykładowo, miasta europejskie, amerykańskie oraz afrykańskie tworzyły odrębne grupy, natomiast miasta takie jak Caracas, San Francisco Bay Area czy Managua wyróżniały się nietypowym położeniem w przestrzeni głównych składowych, co odzwierciedlało ich specyficzne warunki gospodarcze i społeczne. Ponadto analiza biplotu oraz macierzy korelacji potwierdziła istnienie silnych zależności między niektórymi zmiennymi, m.in. wysoką dodatnią korelację między `Startups` a `Venture Capital` (około 0,8) oraz umiarkowaną dodatnią korelację między `Cost of Living` a `Housing` (około 0,57).
+
+Aby uzyskać zadowalającą reprezentację danych, obejmującą około 80% całkowitej wariancji, konieczne było uwzględnienie 7 głównych składowych. Wyjaśnienie 90% wariancji wymagało już 10 składowych, co pokazuje, że struktura danych jest stosunkowo złożona i wymaga większej liczby wymiarów do pełnego uchwycenia różnorodności informacji.
+
+Istotny wpływ na otrzymane wyniki miało zastosowanie standaryzacji zmiennych. Przed standaryzacją zmienne cechowały się znacznymi różnicami w wariancji, co mogłoby prowadzić do dominacji zmiennych o największej zmienności w analizie PCA. Dzięki standaryzacji wszystkie zmienne uzyskały porównywalny rozrzut, co umożliwiło przeprowadzenie rzetelnej analizy i wyciągnięcie wiarygodnych wniosków. Bez przeprowadzenia standaryzacji wyniki PCA byłyby znacznie mniej miarodajne.
+
+# Zadanie nr 3
+## Wprowadzenie
+Przeprowadzimy analizę zbioru danych `titanic_train` z pakietu `titanic` przy użyciu skalowania wielowymiarowego. Celem analizy jest redukcja wymiaru danych i ocena widocznych struktur (grup) wśród pasażerów Titanica na podstawie wybranych zmiennych.
+
+## Przygotowanie danych
+```{r, echo=FALSE}
+data("titanic_train")
+df <- titanic_train
+
+# Zmiana na factor
+df <- df %>%
+  mutate(
+    Survived = as.factor(Survived),
+    Pclass = as.factor(Pclass),
+    Sex = as.factor(Sex),
+    Embarked = as.factor(Embarked)
+  )
+
+# Pozbycie się ID
+df_clean <- df %>%
+  dplyr::select(-PassengerId, -Name, -Ticket, -Cabin)
+
+# Zmienna grupująca
+group_var <- df_clean$Survived
+df_mds <- df_clean %>% dplyr::select(-Survived)
+```
+Na początku wczytano zbiór `titanic_train` z pakietu titanic w R i przekonwertowano zmienne kategoryczne (`Survived`, `Pclass`, `Sex`, `Embarked`) na typ *factor*, aby zapewnić ich poprawne traktowanie podczas analizy.
+Usunięto także zmienne pełniące rolę identyfikatorów (`PassengerId`, `Name`, `Ticket`, `Cabin`), ponieważ nie wnoszą one istotnych informacji do skalowania wielowymiarowego.
+Dodatkowo zmienną `Survived` wyłączono z dalszej analizy wymiarowej, pozostawiając ją jedynie do późniejszej interpretacji wyników.
+
+\newpage
+
+## Redukcja wymiaru
+```{r, echo=FALSE, fig.cap="Wykres Sheparda"}
+# Przekształcenie zmiennych kategorycznych na wartości numeryczne (wymagane dla MDS)
+df_mds_num <- daisy(df_mds, metric = "gower")
+
+# Metryczne MDS (klasyczne)
+mds_fit <- cmdscale(df_mds_num, k = 2, eig = TRUE)
+mds_points <- as.data.frame(mds_fit$points)
+colnames(mds_points) <- c("Dim1", "Dim2")
+mds_points$Survived <- group_var
+
+shepard_obj <- Shepard(df_mds_num, mds_fit$points)
+plot(shepard_obj, pch = ".", xlab = "Odmienności oryginalne", ylab = "Odmienności w odwzorowaniu", main = "Diagram Sheparda")
+lines(lowess(shepard_obj$x, shepard_obj$y), col = "red")
+```
+Aby ocenić jakość otrzymanego odwzorowania, wykorzystano diagram Sheparda. Diagram ten przedstawia zależność między oryginalnymi odmiennościami (z macierzy odmienności) a odległościami w przestrzeni docelowej. Punkty na diagramie układają się blisko linii y = x, oznacza to, że odwzorowanie dobrze zachowuje oryginalne odległości między obserwacjami przy małych wartościach. Odstępstwa od idealnej lini implikują, że przy większych wartościach pojawi się większy rozrzut. Odmienności w odwzorowaniu powinny być jak najmniejsze, w naszym przypadku odmienności świadczą umiarkowanie dobrej jakości redukcji wymiaru.
+
+## Wizualizacja
+```{r, echo=FALSE, fig.width=8, fig.height=10, fig.cap="Wizualizacja po redukcji"}
+Sex = df$Sex
+Pclass = df$Pclass
+p1 <- ggplot(mds_points, aes(x = Dim1, y = Dim2, color = Survived)) +
+  geom_point(size = 2) +
+  theme_minimal() +
+  ggtitle("Wykres rozrzutu Survived")
+
+p2 <- ggplot(mds_points, aes(x = Dim1, y = Dim2, color = Sex)) +
+  geom_point(size = 2) +
+  theme_minimal() +
+  ggtitle("Wykres rozrzutu Sex")
+
+p3 <- ggplot(mds_points, aes(x = Dim1, y = Dim2, color = Pclass)) +
+  geom_point(size = 2) +
+  theme_minimal() +
+  ggtitle("Wykres rozrzutu Pclass")
+
+grid.arrange(p1, p2, p3, ncol = 1)
+```
+
+### Interpretacja wyników
+#### Podział według przeżycia (Survived): \newline
+
+Na wykresie widoczny jest częściowy podział na dwie grupy:
+
+  - Nie Przeżyli: Skupiają się głównie w obszarze dodatnich wartości Dim1 (~0.2 do 0.4) i umiarkowanych Dim2
+  - Przeżyli: Dominują w zakresie ujemnych wartości Dim1 (-0.4 do 0)
+
+Podział jest umiarkowanie zgodny z rzeczywistymi wynikami przeżycia (~65% zgodności). Widoczne nakładanie się grup sugeruje, że czynniki inne niż te uwzględnione w modelu wpływały na przeżycie i istniały wyjątki od ogólnych wzorców (np. kobiety które nie przeżyły).
+
+#### Obserwacje odstające: \newline
+
+Kilka niebieskich punktów (przeżyli) w lewym górnym rogu
+Pojedyńczy czerwony punkt (nie przeżyli) w prawym dolnym rogu
+Dolna część wykresu, okolice (Dim1 = -0.2, Dim2 = -0.3): pojedyncze czerwone punkty (Survived == 0) również odstają od reszty.
+
+#### Podział według płci: \newline
+
+Kobiet wyraźnie skupione po lewej stronie (Dim1 < 0)
+Mężczyźni za to zgrupowani po lewej stronie (Dim1 > 0)
+
+Rozmieszczenie niemal idealnie pokrywa się z podziałem na przeżycie, potwierdzając zasadę "kobiety i dzieci pierwsze".
+
+#### Podział według klasy: \newline
+
+1 klasa jest skupiona w prawym górnym kwadrancie
+
+2 klasa jest w środkowy obszar wykresu
+
+3 klasa znajduje się w lewej dolnej części wykresu
+
+Układ klas pokrywa się z wykresem zmiennej `survived` i `sex`. Ciekawą obserwacją jest to, że część najbiedniejszych kobiet nie przeżyła co może świadczyć o tym, że pierwszeństwo na szalupy miały bogatsze kobiety.

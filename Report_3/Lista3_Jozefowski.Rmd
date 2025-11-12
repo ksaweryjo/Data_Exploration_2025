@@ -1,0 +1,658 @@
+---
+title: "Metody Klasyfikacji"
+author: "Ksawery Józefowski, 277513"
+date: "`r Sys.Date()`"
+output:
+  pdf_document:
+    keep_tex: true
+    toc: true
+    fig_caption: true
+    fig_width: 5
+    fig_height: 4
+    number_sections: true
+  html_document:
+    toc: true
+    df_print: paged
+header-includes:
+- \usepackage[OT4]{polski}
+- \usepackage[utf8]{inputenc}
+- \usepackage{graphicx}
+- \usepackage{float}
+subtitle: "Eksploracja danych - Lista nr 3"
+fontsize: 12pt
+---
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, fig.cap = "")
+knitr::opts_chunk$set(warning = FALSE, message = FALSE) 
+knitr::opts_chunk$set(fig.pos = "H", out.extra = "", fig.align = "center")
+```
+
+```{r, echo=FALSE, results='hide'}
+# Biblioteki
+library(dplyr)
+library(datasets)
+library(HDclassif)
+library(tidyverse)
+library(datasets)
+library(ggplot2)
+library(arules)
+library(titanic)
+library(kableExtra)
+library(gridExtra)
+library(knitr)
+library(ipred)
+library(cluster)
+library(MASS)
+library(factoextra)
+library(class)
+library(rpart)
+library(e1071)
+library(nnet)
+library(naivebayes)
+library(corrplot)
+library(ggcorrplot)
+```
+
+\newpage
+# Zadanie nr 1
+## Wprowadzenie
+W tym zadaniu przeprowadzimy klasyfikację gatunków irysów z wykorzystaniem modelu regresji liniowej. Wykorzystamy zbiór danych `iris`, który zawiera informacje o czterech cechach morfologicznych trzech gatunków irysów.
+
+## Analizowane dane
+```{r, echo=FALSE}
+data(iris)
+kbl(summary(iris),format = 'latex', caption = "Statystyki opisowe zbioru Iris", digits=3) %>% 
+          kable_styling(latex_options = "HOLD_position", bootstrap_options = c("striped", "hover", "condensed"))
+```
+Zbiór danych `iris` zawiera 150 obserwacji, po 50 dla każdego z trzech gatunków: setosa, versicolor i virginica. Każda obserwacja opisana jest czterema cechami: długość płatka (`Petal.Length` - PL), szerokość płatka (`Petal.Width` - PW), długość działki kielicha (`Sepal.Length` - SL) i szerokość działki kielicha (`Sepal.Width` - SW).
+
+\newpage
+## Podział danych na zbiór uczący i testowy
+```{r, echo=FALSE}
+set.seed(123) # dla reprodukowalności wyników
+n <- nrow(iris)
+indeksy <- sample(1:n, size = round(2/3 * n))
+uczacy <- iris[indeksy, ]
+testowy <- iris[-indeksy, ]
+
+# Sprawdzenie rozkładu klas w zbiorach
+kbl(table(uczacy$Species),format = 'latex', caption = "Rozkład klas w zbiorze uczącym", digits=3) %>% 
+          kable_styling(latex_options = "HOLD_position", bootstrap_options = c("striped", "hover", "condensed"))
+    
+kbl(table(testowy$Species),format = 'latex', caption = "Rozkład klas w zbiorze testowym", digits=3) %>% 
+          kable_styling(latex_options = "HOLD_position", bootstrap_options = c("striped", "hover", "condensed"))
+
+```
+Zbiór danych dzielimy na `uczący` i `testowy`. W tym przypadku zastosowaliśmy losowy podział w proporcji 2/3 do 1/3, co jest standardowym podejściem. Ustawienie ziarna generatora liczb pseudolosowych `(set.seed(123))` zapewnia, że podział będzie reprodukowalny.
+
+## Konstrukcja klasyfikatora i wyznaczenie prognoz
+```{r, echo=FALSE}
+# Konwersja zmiennej kategorycznej na numeryczną (1: setosa, 2: versicolor, 3: virginica)
+uczacy$Species_num <- as.numeric(uczacy$Species)
+testowy$Species_num <- as.numeric(testowy$Species)
+
+# Budowa modelu regresji liniowej
+model <- lm(Species_num ~ Petal.Length + Petal.Width + Sepal.Length + Sepal.Width, data = uczacy)
+model_summary <- as.data.frame(coef(summary(model)))
+colnames(model_summary)[4] <- "p value"
+# Podsumowanie modelu
+kbl(model_summary,format = 'latex', caption = "Podsumowanie modelu regresji liniowej", digits=3) %>% 
+          kable_styling(latex_options = "HOLD_position", bootstrap_options = c("striped", "hover", "condensed"))
+
+# Prognozy dla zbioru uczącego
+prognozy_uczacy <- predict(model, newdata = uczacy)
+klasy_uczacy <- round(prognozy_uczacy)
+
+# Prognozy dla zbioru testowego
+prognozy_testowy <- predict(model, newdata = testowy)
+klasy_testowy <- round(prognozy_testowy)
+
+# Ograniczenie wartości do zakresu 1-3
+klasy_uczacy <- pmin(pmax(klasy_uczacy, 1), 3)
+klasy_testowy <- pmin(pmax(klasy_testowy, 1), 3)
+
+```
+W tym punkcie skonstruowaliśmy klasyfikator wykorzystujący model regresji liniowej do predykcji gatunków irysów.Warto zauważyć, że choć regresja liniowa jest tradycyjnie metodą przewidywania wartości ciągłych, w tym przypadku zastosowaliśmy ją do problemu klasyfikacji poprzez odpowiednie przekształcenie zmiennej docelowej i zaokrąglenie wyników. Jest to uproszczone podejście, które może działać dobrze dla liniowo separowalnych klas, co w przypadku zbioru iris częściowo ma miejsce (zwłaszcza dla gatunku setosa).
+
+\newpage
+## Ocena jakości modelu
+```{r, echo=FALSE}
+# Macierz pomyłek dla zbioru uczącego
+macierz_uczacy <- table(Prawdziwe = uczacy$Species_num, Prognozowane = klasy_uczacy)
+kbl(macierz_uczacy,format = 'latex', caption = "Macierz pomyłek - zbiór uczący", digits=3) %>% 
+          kable_styling(latex_options = "HOLD_position", bootstrap_options = c("striped", "hover", "condensed"))
+
+# Błąd klasyfikacji dla zbioru uczącego
+blad_uczacy <- mean(uczacy$Species_num != klasy_uczacy)
+print(paste("Błąd klasyfikacji - zbiór uczący:", round(blad_uczacy, 3)))
+
+# Macierz pomyłek dla zbioru testowego
+macierz_testowy <- table(Prawdziwe = testowy$Species_num, Prognozowane = klasy_testowy)
+kbl(macierz_testowy,format = 'latex', caption = "Macierz pomyłek - zbiór testowy", digits=3) %>% 
+          kable_styling(latex_options = "HOLD_position", bootstrap_options = c("striped", "hover", "condensed"))
+
+# Błąd klasyfikacji dla zbioru testowego
+blad_testowy <- mean(testowy$Species_num != klasy_testowy)
+print(paste("Błąd klasyfikacji - zbiór testowy:", round(blad_testowy, 3)))
+```
+Model regresji liniowej zbudowany na podstawie oryginalnych czterech cech irysów wykazał bardzo dobrą skuteczność klasyfikacyjną. Błąd klasyfikacji na zbiorze uczącym wyniósł zaledwie 2%, natomiast na zbiorze testowym – 4%. Wysoka dokładność predykcji sugeruje, że dane są w dużej mierze liniowo separowalne, a przyjęte założenie dotyczące użycia regresji liniowej jako klasyfikatora było w tym przypadku uzasadnione.
+
+Analiza macierzy pomyłek potwierdza, że klasyfikator doskonale radzi sobie z rozpoznawaniem gatunku `setosa`, który został sklasyfikowany bezbłędnie we wszystkich przypadkach, zarówno w zbiorze uczącym, jak i testowym. Błędy klasyfikacji pojawiły się wyłącznie w rozróżnianiu gatunków `versicolor` i `virginica.`
+
+## Budowa modelu liniowego dla rozszerzonej przestrzeni cech
+```{r, echo=FALSE}
+# Tworzenie nowych zmiennych
+uczacy_poly <- uczacy %>%
+  mutate(
+    PL2 = Petal.Length^2,
+    PW2 = Petal.Width^2,
+    SL2 = Sepal.Length^2,
+    SW2 = Sepal.Width^2,
+    PL_PW = Petal.Length * Petal.Width,
+    PL_SW = Petal.Length * Sepal.Width,
+    PL_SL = Petal.Length * Sepal.Length,
+    PW_SL = Petal.Width * Sepal.Length,
+    PW_SW = Petal.Width * Sepal.Width,
+    SL_SW = Sepal.Length * Sepal.Width
+  )
+
+testowy_poly <- testowy %>%
+  mutate(
+    PL2 = Petal.Length^2,
+    PW2 = Petal.Width^2,
+    SL2 = Sepal.Length^2,
+    SW2 = Sepal.Width^2,
+    PL_PW = Petal.Length * Petal.Width,
+    PL_SW = Petal.Length * Sepal.Width,
+    PL_SL = Petal.Length * Sepal.Length,
+    PW_SL = Petal.Width * Sepal.Length,
+    PW_SW = Petal.Width * Sepal.Width,
+    SL_SW = Sepal.Length * Sepal.Width
+  )
+
+# Nowy model regresji liniowej z cechami wielomianowymi
+model_poly <- lm(Species_num ~ Petal.Length + Petal.Width + Sepal.Length + Sepal.Width +
+                   PL2 + PW2 + SL2 + SW2 + PL_PW + PL_SW + PL_SL + PW_SL + PW_SW + SL_SW, 
+                 data = uczacy_poly)
+
+model_poly_summary <- as.data.frame(coef(summary(model_poly)))
+colnames(model_poly_summary)[4] <- "p value"
+
+kbl(model_poly_summary,format = 'latex', caption = "Model regresji z cechami wielomianowymi", digits=3) %>%
+          kable_styling(latex_options = "HOLD_position", bootstrap_options = c("striped", "hover", "condensed"))
+
+# Prognozy i klasy
+prognozy_uczacy_poly <- predict(model_poly, newdata = uczacy_poly)
+prognozy_testowy_poly <- predict(model_poly, newdata = testowy_poly)
+
+klasy_uczacy_poly <- round(prognozy_uczacy_poly)
+klasy_testowy_poly <- round(prognozy_testowy_poly)
+
+klasy_uczacy_poly <- pmin(pmax(klasy_uczacy_poly, 1), 3)
+klasy_testowy_poly <- pmin(pmax(klasy_testowy_poly, 1), 3)
+
+
+# Macierze pomyłek
+macierz_uczacy_poly <- table(Prawdziwe = uczacy_poly$Species_num, Prognozowane = klasy_uczacy_poly)
+macierz_testowy_poly <- table(Prawdziwe = testowy_poly$Species_num, Prognozowane = klasy_testowy_poly)
+
+# Błędy klasyfikacji
+blad_uczacy_poly <- mean(uczacy_poly$Species_num != klasy_uczacy_poly)
+blad_testowy_poly <- mean(testowy_poly$Species_num != klasy_testowy_poly)
+
+# Wyniki
+kbl(macierz_uczacy_poly,format = 'latex', caption = "Macierz pomyłek - zbiór uczący (model z cechami wielomianowymi)", digits=3) %>% 
+          kable_styling(latex_options = "HOLD_position", bootstrap_options = c("striped", "hover", "condensed"))
+print(paste("Błąd klasyfikacji - zbiór uczący (model z cechami wielomianowymi):", round(blad_uczacy_poly, 3)))
+
+kbl(macierz_testowy_poly,format = 'latex', caption = "Macierz pomyłek - zbiór testowy (model z cechami wielomianowymi))", digits=3) %>% 
+          kable_styling(latex_options = "HOLD_position", bootstrap_options = c("striped", "hover", "condensed"))
+print(paste("Błąd klasyfikacji - zbiór testowy (model z cechami wielomianowymi):", round(blad_testowy_poly, 3)))
+
+```
+
+\newpage
+W celu poprawy jakości klasyfikacji, model regresji został rozszerzony o składniki wielomianowe drugiego stopnia, obejmujące zarówno kwadraty cech (`PL2`, `PW2`, `SL2`, `SW2`), jak i ich iloczyny parami (`PL·PW`, `PL·SW`, `PL·SL`, `PW·SL`, `PW·SW`, `SL·SW`). Celem tej modyfikacji było uchwycenie nieliniowych zależności między zmiennymi oraz umożliwienie lepszego rozdzielenia klas w bardziej złożonej przestrzeni cech.
+
+Nowy model wykazał jeszcze lepszą skuteczność klasyfikacji niż wersja liniowa. Na zbiorze uczącym uzyskano zerowy błąd klasyfikacji (0%), co oznacza, że wszystkie obserwacje zostały sklasyfikowane poprawnie. Również w zbiorze testowym wynik uległ poprawie — błąd spadł z 4% do 2%, co oznacza tylko jedną błędną klasyfikację spośród 50 obserwacji. Gatunek `setosa` nadal został sklasyfikowany bezbłędnie, natomiast niewielka pomyłka dotyczyła rozróżnienia pomiędzy `versicolor` a `virginica`.
+
+Warto zauważyć, że pomimo dodania wielu dodatkowych składników, tylko jeden z nich — iloczyn `SL·SW` — okazał się statystycznie istotny na poziomie 5% (p-value = 0.037), co sugeruje, że nie wszystkie cechy wielomianowe wnoszą istotną informację. Mimo to, nawet jeśli pojedyncze składniki nie są istotne statystycznie, to łącznie mogą one poprawiać zdolność modelu do odwzorowania granic decyzyjnych.
+
+Podsumowując, rozszerzenie modelu o składniki wielomianowe przyniosło zauważalną poprawę skuteczności klasyfikacji, zwłaszcza poprzez eliminację błędów w zbiorze uczącym oraz ograniczenie błędów w zbiorze testowym. Uzyskane wyniki wskazują, że uwzględnienie nieliniowych zależności między cechami może być wartościowe w przypadku problemów klasyfikacyjnych, nawet przy stosunkowo prostych metodach jak regresja liniowa.
+
+\newpage
+# Zadanie nr 2
+## Wprowadzenie
+Celem niniejszej analizy jest porównanie wybranych algorytmów klasyfikacyjnych pod kątem ich skuteczności w rozróżnianiu klas na podstawie danych chemicznych win z zestawu `Wine`, dostępnego w pakiecie `HDclassif`. W analizie zostaną uwzględnione trzy algorytmy klasyfikacyjne: metoda k-najbliższych sąsiadów (k-NN), drzewa decyzyjne oraz klasyfikator Bayesa. Jak i dodatkowo użyte zostaną wersje tych algorytmów z zastosowaniem PCA i algorytm regresji. Analiza będzie obejmować wstępne zapoznanie się z danymi, ocenę dokładności poszczególnych modeli, a także weryfikację, które cechy mają największe znaczenie dla poprawnej klasyfikacji.
+
+## Wybór i zapoznanie się z danymi
+```{r, echo=FALSE, results='hide'}
+data(wine)
+
+# Sprawdzenie struktury danych
+n_obserwacji <- nrow(wine)
+n_cech <- ncol(wine) - 1 # pomijamy kolumnę z klasą
+n_klas <- length(unique(wine$class))
+any(is.na(wine)) # Zwraca FALSE
+wine$class <- as.factor(wine$class)
+```
+Charakterystyka zbioru danych:
+
+  - Liczba przypadków (obserwacji): `r n_obserwacji`
+  - Liczba zmiennych (cech): `r n_cech`
+  - Liczba klas: `r n_klas`
+
+Zmienna `class` zawiera etykiety klas i została odpowiednio przekonwertowana na typ `factor`.
+
+W zbiorze nie występują brakujące dane (`NA`).
+
+Wszystkie zmienne mają typ `numeric`, z wyjątkiem `class`, która została skonwertowana do `factor`.
+
+## Wstępna analiza danych
+### Rozkład klas
+```{r plot1, fig.cap="Rozkłady klas", echo=FALSE}
+ggplot(data = as.data.frame(table(wine$class)), 
+       aes(x = Var1, y = Freq, fill = Var1)) +
+  geom_bar(stat = "identity") +
+  geom_text(aes(label = Freq), vjust = -0.5) +
+  labs(title = "",
+       x = "Klasa", y = "Liczba obserwacji") +
+  theme_minimal() +
+  theme(legend.position = "none")
+```
+```{r, echo=FALSE}
+# Połączenie tabel liczebności i proporcji
+combined_table <- cbind(
+  Liczebność = table(wine$class),
+  Proporcja = prop.table(table(wine$class)))
+
+kbl(combined_table, 
+    format = 'latex', 
+    caption = "Rozkład klas - liczebność i proporcje", 
+    digits = 3,
+    row.names = TRUE) %>% 
+  kable_styling(latex_options = "HOLD_position", 
+               bootstrap_options = c("striped", "hover", "condensed"))
+
+# Najczęstsza klasa
+najczestsza_klasa <- names(which.max(table(wine$class)))
+błąd_klasyfikacji_majority <- 1 - max(prop.table(table(wine$class)))
+```
+W zbiorze danych `Wine` występują 3 klasy (oznaczone jako `1`, `2` i `3`). Rozkład liczebności klas nie jest zupełnie równomierny – najliczniejsza klasa to klasa `r najczestsza_klasa`, która stanowi około `r round(max(prop.table(table(wine$class))) * 100, 1)`% całego zbioru. Przypisując wszystkie obiekty do tej klasy, uzyskalibyśmy błąd klasyfikacji równy około `r round(błąd_klasyfikacji_majority, 2)`. Oznacza to, że taki naiwny klasyfikator pomyliłby się w ok. `r round(błąd_klasyfikacji_majority * 100)`% przypadków.
+
+### Analiza zmienności
+```{r, echo=FALSE}
+wariancje <- apply(wine[, -1], 2, var)
+kbl(sort(wariancje, decreasing = TRUE), digits = 3, format = 'latex', col.names = "Wariancja", caption = "Wariancje cech chemicznych") %>% 
+  kable_styling(latex_options = "HOLD_position", 
+               bootstrap_options = c("striped", "hover", "condensed"))
+```
+Zmienność cech w zbiorze `Wine` jest bardzo zróżnicowana – wariancje poszczególnych zmiennych różnią się bardzo. Oznacza to, że przed zastosowaniem niektórych algorytmów, niezbędna będzie standaryzacja danych, aby uniknąć dominacji cech o większej skali.
+
+\newpage
+### Zdolności dyskryminacyjne
+```{r wykresy_gestosc, fig.pos = "H", fig.cap="Rozkłady cech V1–V13 według klasy", echo=FALSE, fig.width=18, fig.height=22, out.width="99%"}
+plots <- lapply(1:13, function(i) {
+  var_name <- paste0("V", i)
+  ggplot(wine, aes(x = .data[[var_name]], fill = class)) +
+    geom_density(alpha = 0.5) +
+    ggtitle(paste("Rozkład", var_name)) +
+    theme_minimal() +
+    labs(x = var_name, y = "Gęstość") +
+    scale_fill_brewer(palette = "Set1") +
+    theme(plot.title = element_text(size = 20))
+})
+
+grid.arrange(
+  grobs = plots,
+  ncol = 2,
+  top = "",
+  padding = unit(0.1, "lines")
+)
+```
+Z rysunku 2 można wywnioskować, że najlepiej dyskryminującymi cechami są - `V7`, `V13`, `V12`. 
+Cechy które również dość dobrze dyskryminują klasy to - `V10`, `V1` i `V11`.
+Najgorzej dyskryminuje cecha `V3`.
+
+## Ocena dokładności klasyfikacji i porównanie metod
+### Po standaryzacji i bez PCA
+```{r, echo=FALSE}
+set.seed(123)
+n <- nrow(wine)
+indeksy2 <- sample(1:n, size = round(2/3 * n))
+uczacy2 <- wine[indeksy2, ]
+testowy2 <- wine[-indeksy2, ]
+
+cols_to_scale <- setdiff(names(uczacy2), "class")  # Zakładając, że 'class' to kolumna z etykietami
+
+means <- apply(uczacy2[, cols_to_scale], 2, mean)
+sds <- apply(uczacy2[, cols_to_scale], 2, sd)
+
+# Standaryzacja zbioru uczącego
+uczacy2_std <- as.data.frame(scale(uczacy2[, cols_to_scale], center = means, scale = sds))
+uczacy2_std$class <- uczacy2$class  # Dodanie kolumny z klasami (jeśli istnieje)
+
+# Standaryzacja zbioru testowego
+testowy2_std <- as.data.frame(scale(testowy2[, cols_to_scale], center = means, scale = sds))
+testowy2_std$class <- testowy2$class  # Dodanie kolumny z klasami
+
+```
+
+```{r, echo=FALSE}
+# K-NN
+knn_pred <- knn(train = uczacy2_std[, -ncol(uczacy2_std)],
+                test = testowy2_std[, -ncol(testowy2_std)],
+                cl = uczacy2_std$class,
+                k = 3)
+
+# Macierz pomyłek jako tabela
+conf_mat_knn <- table(Prawdziwe = testowy2_std$class, Przewidywane = knn_pred)
+
+# Konwersja na ramkę danych
+conf_df_knn <- as.data.frame.matrix(conf_mat_knn)
+
+kbl(conf_df_knn,
+    format = 'latex',
+    caption = "Macierz pomyłek K-NN",
+    digits = 3) %>%
+  kable_styling(latex_options = "HOLD_position",
+                bootstrap_options = c("striped", "hover", "condensed"))
+# Błąd klasyfikacji
+print(paste("Błąd klasyfikacji K-NN:", round(mean(knn_pred != testowy2_std$class), 3)))
+
+# Drzewo
+tree_model <- rpart(class ~ ., data = uczacy2_std, method = "class")
+tree_preds <- predict(tree_model, testowy2_std, type = "class")
+
+conf_tree <- table(Prawdziwe = testowy2_std$class, Prognozowane = tree_preds)
+kbl(conf_tree, format = 'latex', caption = "Macierz pomyłek Drzewo", digits = 3) %>%
+  kable_styling(latex_options = "HOLD_position", bootstrap_options = c("striped", "hover", "condensed"))
+
+print(paste("Błąd klasyfikacji Drzewo:", round(mean(tree_preds != testowy2_std$class), 3)))
+
+# Bayes
+nb_model <- naiveBayes(class ~ ., data = uczacy2_std)
+nb_preds <- predict(nb_model, testowy2_std)
+
+conf_nb <- table(Prawdziwe = testowy2_std$class, Prognozowane = nb_preds)
+kbl(conf_nb, format = 'latex', caption = "Macierz pomyłek Bayes", digits = 3) %>%
+  kable_styling(latex_options = "HOLD_position", bootstrap_options = c("striped", "hover", "condensed"))
+
+print(paste("Błąd klasyfikacji Bayes:", round(mean(nb_preds != testowy2_std$class), 3)))
+
+# Regresja
+log_model <- multinom(class ~ ., data = uczacy2_std, trace = FALSE)
+log_preds <- predict(log_model, newdata = testowy2_std)
+
+conf_log <- table(Prawdziwe = testowy2_std$class, Prognozowane = log_preds)
+kbl(conf_log, format = 'latex', caption = "Macierz pomyłek Regresja", digits = 3) %>%
+  kable_styling(latex_options = "HOLD_position", bootstrap_options = c("striped", "hover", "condensed"))
+
+print(paste("Błąd klasyfikacji Regresja:", round(mean(log_preds != testowy2_std$class), 3)))
+
+```
+
+### Po standaryzacji i PCA
+```{r, echo=FALSE, results='hide'}
+# PCA na zbiorze uczącym
+pca <- prcomp(uczacy2_std[, -which(names(uczacy2_std) == "class")], center = FALSE, scale. = FALSE)
+summary(pca)
+
+n_comp <- 5 # Ilość głównych składowych
+pca_train <- as.data.frame(pca$x[, 1:n_comp])
+pca_train$class <- uczacy2_std$class
+
+pca_test_values <- predict(pca, newdata = testowy2_std[, -which(names(testowy2_std) == "class")])
+pca_test <- as.data.frame(pca_test_values[, 1:n_comp])
+pca_test$class <- testowy2_std$class
+```
+
+```{r, echo=FALSE}
+# K-NN
+knn_pred_pca <- knn(train = pca_train[, 1:n_comp], test = pca_test[, 1:n_comp],
+                    cl = pca_train$class, k = 3)
+
+conf_knn_pca <- table(Prawdziwe = pca_test$class, Prognozowane = knn_pred_pca)
+
+kbl(conf_knn_pca, format = 'latex', caption = "Macierz pomyłek K-NN po PCA", digits = 3) %>%
+  kable_styling(latex_options = "HOLD_position", bootstrap_options = c("striped", "hover", "condensed"))
+
+print(paste("Błąd klasyfikacji K-NN po PCA:", round(mean(knn_pred_pca != pca_test$class), 3)))
+
+# Drzewo
+tree_model_pca <- rpart(class ~ ., data = pca_train, method = "class")
+tree_preds_pca <- predict(tree_model_pca, newdata = pca_test, type = "class")
+
+conf_tree_pca <- table(Prawdziwe = pca_test$class, Prognozowane = tree_preds_pca)
+
+kbl(conf_tree_pca, format = 'latex', caption = "Macierz pomyłek Drzewa po PCA", digits = 3) %>%
+  kable_styling(latex_options = "HOLD_position", bootstrap_options = c("striped", "hover", "condensed"))
+
+print(paste("Błąd klasyfikacji Drzewa po PCA:", round(mean(tree_preds_pca != pca_test$class), 3)))
+
+# Bayes
+nb_model_pca <- naiveBayes(class ~ ., data = pca_train)
+nb_preds_pca <- predict(nb_model_pca, newdata = pca_test)
+
+conf_nb_pca <- table(Prawdziwe = pca_test$class, Prognozowane = nb_preds_pca)
+
+kbl(conf_nb_pca, format = 'latex', caption = "Macierz pomyłek Bayes po PC", digits = 3) %>%
+  kable_styling(latex_options = "HOLD_position", bootstrap_options = c("striped", "hover", "condensed"))
+
+print(paste("Błąd klasyfikacji Bayes po PCA:", round(mean(nb_preds_pca != pca_test$class), 3)))
+
+# Regresja
+log_model_pca <- multinom(class ~ ., data = pca_train, trace = FALSE)
+log_preds_pca <- predict(log_model_pca, newdata = pca_test)
+
+conf_log_pca <- table(Prawdziwe = pca_test$class, Prognozowane = log_preds_pca)
+
+kbl(conf_log_pca, format = 'latex', caption = "Macierz pomyłek Regresji po PCA", digits = 3) %>%
+  kable_styling(latex_options = "HOLD_position", bootstrap_options = c("striped", "hover", "condensed"))
+
+print(paste("Błąd klasyfikacji Regresji po PCA:", round(mean(log_preds_pca != pca_test$class), 3)))
+```
+
+\newpage
+### Interpretacja
+W przypadku klasyfikacji bez redukcji wymiarowości, najwyższą dokładność osiągnęły modele `Bayesa` i `Regresji`, które poprawnie sklasyfikowały wszystkie obserwacje w zbiorze testowym (błąd `0%`). Nieco słabsze wyniki uzyskał klasyfikator `K-NN` z błędem `1.7%`, gdzie jedna obserwacja klasy 2 została błędnie przypisana do klasy 1. Najmniej dokładne okazało się `drzewo decyzyjne`, które popełniło `8.5%` błędów, głównie poprzez mylenie obserwacji między klasami 1 i 2 oraz 1 i 3.
+
+Po zastosowaniu `PCA` zaobserwowano ogólną poprawę skuteczności modeli. Najbardziej widoczna zmiana dotyczyła `drzewa decyzyjnego`, którego błąd zmniejszył się ponad dwukrotnie (z `8.5%` do `3.4%`). W tym przypadku model nadal mylił obserwacje między klasami 1 i 2, ale w mniejszym stopniu. Klasyfikatory `Bayesa` i `Regresji` zachowały perfekcyjną skuteczność (`0%` błędów), podobnie jak w przypadku analizy bez `PCA.` Algorytm `K-NN` utrzymał błąd na poziomie `1.7%`, co wskazuje, że redukcja wymiarowości nie wpłynęła znacząco na jego działanie.
+
+Po wynikach można zauważyć, że modele generalizują dobrze. Nie występuje znacząca różnica w dokładności, co sugeruje brak nadmiernego dopasowania. Wyjątkiem jest `drzewo decyzyjne`, które przed zastosowaniem `PCA` wykazywało większą tendencję do błędów, co mogło wynikać z jego naturalnej skłonności do przeuczenia. Po redukcji wymiarowości jego skuteczność znacząco się poprawiła, co potwierdza, że `PCA` może być szczególnie korzystne dla tego typu modeli.
+
+### Wersja zaawansowana
+```{r, echo=FALSE}
+set.seed(123)
+
+# Funkcje pomocnicze
+my.predict <- function(model, newdata) predict(model, newdata = newdata, type = "class")
+
+# K-NN
+my.ipredknn <- function(formula1, data1) ipredknn(formula = formula1, data = data1, k = 3)
+
+# Drzewo
+my.tree <- function(formula1, data1) rpart(formula1, data = data1, method = "class")
+
+# Bayes
+my.nb <- function(formula1, data1) naiveBayes(formula1, data = data1)
+
+# Regresja
+my.log <- function(formula1, data1) multinom(formula1, data = data1, trace = FALSE)
+
+# Lista modeli
+modele <- list(KNN = my.ipredknn, Tree = my.tree, Bayes = my.nb, Regresja = my.log)
+
+# Funkcja cross-validation dla modelu
+cv_blad <- function(model_fun, dane) {
+  errorest(class ~ ., data = dane,
+           model = model_fun,
+           predict = my.predict,
+           estimator = "cv",
+           est.para = control.errorest(k = 10))$error
+}
+
+# Cross-validation bez PCA
+cv_bez_pca <- sapply(modele, cv_blad, dane = uczacy2_std)
+
+# Cross-validation z PCA
+cv_z_pca <- sapply(modele, cv_blad, dane = pca_train)
+
+# Tabela wyników
+cv_wyniki <- data.frame(
+  CV_bez_PCA = round(cv_bez_pca, 3),
+  CV_z_PCA = round(cv_z_pca, 3)
+)
+
+kbl(cv_wyniki,
+    format = "latex",
+    caption = "Błędy klasyfikacji (cross-validation 10-fold)",
+    digits = 3) %>%
+  kable_styling(latex_options = "HOLD_position", bootstrap_options = c("striped", "hover", "condensed"))
+
+```
+Porównując wyniki klasyfikatorów uzyskane metodą jednorazowego podziału danych ze skutecznością ocenioną za pomocą walidacji krzyżowej, widać, że pojedynczy podział przeszacowuje możliwości modeli. Klasyfikatory `Bayesa` i `regresji`, które wcześniej osiągały `100%` trafności, w `cross-validation` uzyskały błąd na poziomie `4.2%`. `K-NN`, wcześniej z błędem `1.7%`, osiągnął `5.9%`, a `drzewo` z `8.5%` wzrosło do `13.4%`. Po zastosowaniu `PCA`, największą poprawę odnotowano dla `drzewa decyzyjnego` (spadek błędu do `9.2%`), co potwierdza, że redukcja wymiarowości pomaga mu unikać przeuczenia. Pozostałe algorytmy nie zyskały znacząco. `Bayes` i `regresja` utrzymały poziom `4.2%`, a `k-NN` zanotował niewielkie *pogorszenie* (`6.7%`). Wnioski wskazują, że walidacja krzyżowa daje bardziej realistyczny obraz skuteczności modeli, a `PCA` najbardziej wspiera modele podatne na przeuczenie, jak drzewa decyzyjne.
+
+## Ocena na podstawie różnych parametrów
+```{r, echo=FALSE}
+# Zakładając, że wcześniejsza analiza wskazała V7, V12, V13 jako najlepsze
+top_features <- c("V7", "V12", "V13", "class")
+top_train <- uczacy2_std[, top_features]
+top_test <- testowy2_std[, top_features]
+top_pca_train <- pca_train[, c("PC1", "PC2", "class")]
+top_pca_test <- pca_test[, c("PC1", "PC2", "class")]
+
+custom_cv <- function(data, model_func, predict_func, params, k_folds = 5) {
+  folds <- sample(cut(1:nrow(data), breaks = k_folds, labels = FALSE))
+  results <- list()
+
+  for (param in params) {
+    errors <- numeric(k_folds)
+    for (i in 1:k_folds) {
+      test_idx <- which(folds == i)
+      model <- model_func(data[-test_idx, ], param)
+      pred <- predict_func(model, data[test_idx, ])
+      errors[i] <- mean(pred != data[test_idx, "class"])
+    }
+    param_name <- if (is.null(param)) "brak" else as.character(param)
+    results[[param_name]] <- mean(errors)
+  }
+  results
+}
+
+# K-NN z różnymi k
+knn_model <- function(data, k) {
+  list(
+    train = data[, -ncol(data)],
+    cl = data$class,
+    k = k
+  )
+}
+
+knn_predict <- function(model, newdata) {
+  knn(
+    train = model$train,
+    test = newdata[, -ncol(newdata)],
+    cl = model$cl,
+    k = model$k
+  )
+}
+
+# Drzewo z różnymi głębokościami
+tree_model <- function(data, depth) {
+  rpart(class ~ ., data = data, method = "class", 
+        control = rpart.control(maxdepth = depth))
+}
+
+# Bayes (brak parametrów)
+bayes_model <- function(data, param = NULL) {
+  naiveBayes(class ~ ., data = data)
+}
+
+# Regresja (brak parametrów)
+regression_model <- function(data, param = NULL) {
+  multinom(class ~ ., data = data, trace = FALSE)
+}
+
+# Uniwersalna funkcja predict
+generic_predict <- function(model, newdata) {
+  if (inherits(model, "rpart")) {
+    predict(model, newdata, type = "class")
+  } else if (inherits(model, "naiveBayes")) {
+    predict(model, newdata)
+  } else if (inherits(model, "nnet")) {
+    predict(model, newdata, type = "class")
+  } else {
+    predict(model, newdata)
+  }
+}
+
+set.seed(123)
+
+# K-NN: testowanie różnych k
+k_values <- c(1, 3, 5, 7, 9)
+knn_results <- custom_cv(uczacy2_std, knn_model, knn_predict, k_values)
+knn_top_results <- custom_cv(top_train, knn_model, knn_predict, k_values)
+
+# Drzewo: testowanie różnych głębokości
+depths <- c(2, 3, 4, 5)
+tree_results <- custom_cv(uczacy2_std, tree_model, generic_predict, depths)
+tree_top_results <- custom_cv(top_train, tree_model, generic_predict, depths)
+
+# Bayes i Regresja (bez parametrów)
+bayes_results <- custom_cv(uczacy2_std, bayes_model, generic_predict, list(NULL))
+reg_results <- custom_cv(uczacy2_std, regression_model, generic_predict, list(NULL))
+
+# Najlepsze parametry
+best_k <- k_values[which.min(unlist(knn_results))]
+best_depth <- depths[which.min(unlist(tree_results))]
+
+# Tabela porównawcza
+comparison <- data.frame(
+  Metoda = c("K-NN", "Drzewo", "Bayes", "Regresja"),
+  `Wszystkie cechy` = c(
+    min(unlist(knn_results)),
+    min(unlist(tree_results)),
+    unlist(bayes_results),
+    unlist(reg_results)
+  ),
+  `Top cechy` = c(
+    min(unlist(knn_top_results)),
+    min(unlist(tree_top_results)),
+    custom_cv(top_train, bayes_model, generic_predict, list(NULL))[[1]],
+    custom_cv(top_train, regression_model, generic_predict, list(NULL))[[1]]
+  ),
+  `PCA (top 2)` = c(
+    custom_cv(top_pca_train, knn_model, knn_predict, list(best_k))[[1]],
+    custom_cv(top_pca_train, tree_model, generic_predict, list(best_depth))[[1]],
+    custom_cv(top_pca_train, bayes_model, generic_predict, list(NULL))[[1]],
+    custom_cv(top_pca_train, regression_model, generic_predict, list(NULL))[[1]]
+  ),
+  `Parametr` = c(
+    paste("k =", best_k),
+    paste("depth =", best_depth),
+    "-",
+    "-"
+  )
+)
+
+kbl(comparison, 
+      caption = "Porównanie błędów klasyfikacji dla różnych konfiguracji",
+      digits = 3,
+      col.names = c("Metoda", "Wszystkie cechy", "Top 3 cechy", "PCA (2 składowe)", "Najlepszy parametr")) %>%
+  kable_styling(latex_options = "HOLD_position", bootstrap_options = c("striped", "hover", "condensed"))
+```
+
+Najlepsze wyniki dla metody `K-NN` osiągnięto wykorzystującej wszystkie dostępne cechy z parametrem k=5, gdzie błąd klasyfikacji wyniósł zaledwie `4.2%`. W przypadku zastosowania jedynie trzech najlepszych cech (`V7`, `V12`, `V13`) błąd wzrósł do `6.7%`, a dla dwóch głównych składowych `PCA` utrzymał się na poziomie `6.7%`, co wskazuje, że pełny zestaw cech zapewnia najwyższą dokładność tej metodzie.
+
+Dla `drzew decyzyjnych` obserwujemy odmienny trend, podczas gdy wykorzystanie wszystkich cech dało błąd `12.7%` (przy optymalnej głębokości równej 2), redukcja wymiarowości okazała się korzystna. W przypadku `PCA` błąd spadł do `8.4%`, co sugeruje, że `drzewa` zyskują na uproszczeniu przestrzeni cech. Co ciekawe, zastosowanie jedynie trzech wybranych cech pogorszyło wyniki (błąd `20.3%`), co może wskazywać na utratę istotnych informacji dyskryminacyjnych.
+
+Metoda `Bayesa` i `regresji` wykazały podobne wzorce, najlepsze wyniki osiągnięto przy pełnym zestawie cech (odpowiednio `3.3%` i `3.4%` błędu). W obu przypadkach redukcja cech prowadziła do pogorszenia skuteczności, przy czym `PCA` okazało się lepszym rozwiązaniem niż wybór trzech pojedynczych cech (błędy `8.4%` vs `9.2%` dla `Bayesa` i `6.7%` vs `9.2%` dla `regresji`).
+
+## Wnioski
+Najlepsze wyniki klasyfikacji uzyskano przy wykorzystaniu pełnego zestawu cech predykcyjnych dla większości metod. `K-NN` osiągał optymalną skuteczność przy odpowiednio dobranym parametrze 
+k, `regresja` i `Bayes` również najlepiej działały bez redukcji liczby cech. Dla `drzewa decyzyjnego` konieczne było ograniczenie głębokości i zastosowanie `PCA`, co znacząco poprawiało jakość klasyfikacji.
+
+Spośród analizowanych metod, `regresja` i naiwny `Bayes` okazały się najskuteczniejsze i najbardziej stabilne. `K-NN` dawał dobre wyniki, jednak był bardziej wrażliwy na wybór parametru. `Drzewo decyzyjne` charakteryzowało się największą zmiennością, bez redukcji liczby cech wykazywało tendencję do przeuczenia.
+
+Wybór schematu oceny miał istotny wpływ na wnioski, ponieważ ocena na podstawie pojedynczego podziału danych często przeszacowywała skuteczność modeli. Walidacja krzyżowa ujawniała rzeczywistą jakość metod, szczególnie tych podatnych na przeuczenie.
